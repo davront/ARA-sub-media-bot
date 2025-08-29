@@ -3,7 +3,6 @@ import logging
 import os
 import time
 from typing import Optional
-from aiohttp import web
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart
@@ -24,16 +23,6 @@ BOT_TOKEN: Optional[str] = os.getenv("TOKEN") or os.getenv("BOT_TOKEN")
 CHANNEL_ID_RAW: Optional[str] = os.getenv("CHANNEL_ID")  # e.g. -1001234567890 or @my_channel
 GROUP_ID_RAW: Optional[str] = os.getenv("GROUP_ID")  # e.g. -1001234567890
 CHANNEL_LINK: Optional[str] = os.getenv("CHANNEL_LINK")  # e.g. https://t.me/my_channel
-
-# Debug logging for deployment
-print(f"Environment check:")
-print(f"TOKEN: {'SET' if os.getenv('TOKEN') else 'NOT SET'}")
-print(f"BOT_TOKEN: {'SET' if os.getenv('BOT_TOKEN') else 'NOT SET'}")
-print(f"CHANNEL_ID: {'SET' if os.getenv('CHANNEL_ID') else 'NOT SET'}")
-print(f"GROUP_ID: {'SET' if os.getenv('GROUP_ID') else 'NOT SET'}")
-print(f"CHANNEL_LINK: {'SET' if os.getenv('CHANNEL_LINK') else 'NOT SET'}")
-print(f"Final BOT_TOKEN: {'SET' if BOT_TOKEN else 'NOT SET'}")
-print(f"Final CHANNEL_ID: {'SET' if CHANNEL_ID_RAW else 'NOT SET'}")
 
 
 def parse_chat_id(id_raw: Optional[str]) -> Optional[int | str]:
@@ -248,30 +237,11 @@ async def on_id(message: Message, bot: Bot) -> None:
     await message.answer(f"chat.id = {chat.id}\nchat.type = {chat.type}")
 
 
-# HTTP server for Render Web Services
-async def health_check(request):
-    return web.Response(text="Bot is running!")
-
-
-async def start_http_server():
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    app.router.add_get('/health', health_check)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', 8080)))
-    await site.start()
-    logging.info("HTTP server started on port %s", os.getenv('PORT', 8080))
-
-
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     dp.include_router(router)
-
-    # Start HTTP server for Render Web Services
-    await start_http_server()
 
     # Drop pending updates
     await bot.delete_webhook(drop_pending_updates=True)

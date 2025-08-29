@@ -26,17 +26,10 @@ GROUP_ID=-1002738133830
 CHANNEL_LINK=https://t.me/ваш_канал
 ```
 
-## Деплой на Render.com
-
-1. Создайте Web Service на [Render.com](https://render.com)
-2. Подключите GitHub репозиторий
-3. Добавьте переменные окружения:
-   - `TOKEN` = токен бота из @BotFather
-   - `CHANNEL_ID` = @ваш_канал или -100...
-   - `GROUP_ID` = -1002738133830
-   - `CHANNEL_LINK` = https://t.me/ваш_канал
-4. Build Command: `pip install -r requirements.txt`
-5. Start Command: `python main.py`
+## Запуск
+```bash
+python main.py
+```
 
 ## Команды бота
 - `/start` - приветствие
@@ -45,4 +38,8 @@ CHANNEL_LINK=https://t.me/ваш_канал
 
 ## Права бота
 - В группе: ограничивать участников, удалять сообщения
-- В канале: просмотр участников (для приватного - админ) 
+- В канале: просмотр участников (для приватного - админ)
+
+## Как получить ID
+- Группа: добавьте @RawDataBot в группу или используйте команду `/id`
+- Канал: перешлите сообщение из канала в @RawDataBot 
