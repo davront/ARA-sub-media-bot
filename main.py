@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from typing import Optional
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import Command, CommandStart
@@ -237,14 +238,35 @@ async def on_id(message: Message, bot: Bot) -> None:
     await message.answer(f"chat.id = {chat.id}\nchat.type = {chat.type}")
 
 
+# HTTP server for Render Web Services
+async def health_check(request):
+    return web.Response(text="Bot is running!")
+
+
+async def start_http_server():
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv('PORT', 8080)))
+    await site.start()
+    logging.info("HTTP server started on port %s", os.getenv('PORT', 8080))
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     dp.include_router(router)
 
+    # Start HTTP server for Render Web Services
+    await start_http_server()
+
     # Drop pending updates
     await bot.delete_webhook(drop_pending_updates=True)
+    
+    # Start bot polling
     await dp.start_polling(bot)
 
 
