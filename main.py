@@ -25,6 +25,16 @@ CHANNEL_ID_RAW: Optional[str] = os.getenv("CHANNEL_ID")  # e.g. -1001234567890 o
 GROUP_ID_RAW: Optional[str] = os.getenv("GROUP_ID")  # e.g. -1001234567890
 CHANNEL_LINK: Optional[str] = os.getenv("CHANNEL_LINK")  # e.g. https://t.me/my_channel
 
+# Debug logging for deployment
+print(f"Environment check:")
+print(f"TOKEN: {'SET' if os.getenv('TOKEN') else 'NOT SET'}")
+print(f"BOT_TOKEN: {'SET' if os.getenv('BOT_TOKEN') else 'NOT SET'}")
+print(f"CHANNEL_ID: {'SET' if os.getenv('CHANNEL_ID') else 'NOT SET'}")
+print(f"GROUP_ID: {'SET' if os.getenv('GROUP_ID') else 'NOT SET'}")
+print(f"CHANNEL_LINK: {'SET' if os.getenv('CHANNEL_LINK') else 'NOT SET'}")
+print(f"Final BOT_TOKEN: {'SET' if BOT_TOKEN else 'NOT SET'}")
+print(f"Final CHANNEL_ID: {'SET' if CHANNEL_ID_RAW else 'NOT SET'}")
+
 
 def parse_chat_id(id_raw: Optional[str]) -> Optional[int | str]:
     if not id_raw:
