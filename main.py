@@ -233,19 +233,19 @@ def subscribed_keyboard(target_user_id: int = None) -> InlineKeyboardBuilder:
     
     # Channel link button
     if CHANNEL_LINK:
-        kb.button(text="📺 Перейти на канал", url=CHANNEL_LINK)
+        kb.button(text="📺 Kanaldan o'ting", url=CHANNEL_LINK)
     elif isinstance(CHANNEL_ID, str) and CHANNEL_ID.startswith('@'):
-        kb.button(text="📺 Перейти на канал", url=f"https://t.me/{CHANNEL_ID[1:]}")
+        kb.button(text="📺 Kanaldan o'ting", url=f"https://t.me/{CHANNEL_ID[1:]}")
     else:
-        kb.button(text="📺 Перейти на канал", url=f"https://t.me/c/{str(CHANNEL_ID)[4:]}/1")
+        kb.button(text="📺 Kanaldan o'ting", url=f"https://t.me/c/{str(CHANNEL_ID)[4:]}/1")
     
     # Subscription confirmation button
     if target_user_id:
         # Include target user ID in callback data
-        kb.button(text="✅ Я подписался", callback_data=f"i_subscribed_{target_user_id}")
+        kb.button(text="✅ Men obuna bo'ldim", callback_data=f"i_subscribed_{target_user_id}")
     else:
         # Fallback for backward compatibility
-        kb.button(text="✅ Я подписался", callback_data="i_subscribed")
+        kb.button(text="✅ Men obuna bo'ldim", callback_data="i_subscribed")
     
     kb.adjust(1)  # One button per row
     return kb
@@ -758,7 +758,7 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
     logging.info(f"📝 Кнопка была для user_id {mentioned_user_id}, пользователь {user_id} нажал")
     if user_id != mentioned_user_id:
         logging.warning(f"🚫 Неверный пользователь {user_id} нажал кнопку, она была для user_id {mentioned_user_id}")
-        await callback.answer("Эта кнопка не для вас!", show_alert=True)
+        await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
         return
     logging.info(f"✅ Верный пользователь {user_id} нажал свою кнопку")
     
