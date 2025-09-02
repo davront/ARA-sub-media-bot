@@ -148,11 +148,21 @@ async def auto_check_subscription(bot: Bot, chat_id: int, user_id: int, user_dis
                     # Send welcome message
                     welcome_text = f"🎉 Avtomatik ravishda obuna topildi!\n\n👤 {user_display_name}, guruhga xush kelibsiz!\n✅ Endi xabar yozishingiz mumkin."
                     
-                    sent_welcome = await bot.send_message(
-                        chat_id=chat_id,
-                        text=welcome_text,
-                        reply_to_message_id=message_id
-                    )
+                    # Проверяем, существует ли сообщение для ответа
+                    try:
+                        await bot.get_message(chat_id, message_id)
+                    except Exception:
+                        logging.warning(f"⚠️ Сообщение {message_id} недоступно для ответа, отправляю без reply")
+                        sent_welcome = await bot.send_message(
+                            chat_id=chat_id,
+                            text=welcome_text
+                        )
+                    else:
+                        sent_welcome = await bot.send_message(
+                            chat_id=chat_id,
+                            text=welcome_text,
+                            reply_to_message_id=message_id
+                        )
                     
                     logging.info(f"📝 Автопроверка: отправил приветствие пользователю {user_id}, message_id={sent_welcome.message_id}")
                     
@@ -212,11 +222,28 @@ async def send_reminder(bot: Bot, chat_id: int, user_id: int, user_display_name:
             f"🔗 Tugma yuqoridagi xabarda ⬆️"
         )
         
-        sent_reminder = await bot.send_message(
-            chat_id=chat_id,
-            text=reminder_text,
-            reply_to_message_id=message_id
-        )
+        # Проверяем, существует ли сообщение для ответа
+        try:
+            await bot.get_chat(chat_id)
+        except Exception:
+            logging.warning(f"⚠️ Чат {chat_id} недоступен, пропускаю напоминание")
+            return
+        
+        # Проверяем, существует ли сообщение для ответа
+        try:
+            await bot.get_message(chat_id, message_id)
+        except Exception:
+            logging.warning(f"⚠️ Сообщение {message_id} недоступно для ответа, отправляю без reply")
+            sent_reminder = await bot.send_message(
+                chat_id=chat_id,
+                text=reminder_text
+            )
+        else:
+            sent_reminder = await bot.send_message(
+                chat_id=chat_id,
+                text=reminder_text,
+                reply_to_message_id=message_id
+            )
         
         logging.info(f"⏰ Foydalanuvchi {user_id} uchun eskirmasini yubording, message_id={sent_reminder.message_id}")
         
@@ -313,11 +340,24 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
         f"💡 Obuna bo'lgandan so'ng quyidagi tugmani bosing:"
     )
     try:
-        sent_msg = await message.reply(
-            text,
-            reply_markup=subscribed_keyboard(user_id).as_markup(),
-            disable_web_page_preview=True,
-        )
+        # Проверяем, существует ли сообщение для ответа
+        try:
+            await bot.get_message(chat_id, message.message_id)
+        except Exception:
+            logging.warning(f"⚠️ Сообщение {message.message_id} недоступно для ответа, отправляю без reply")
+            sent_msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=subscribed_keyboard(user_id).as_markup(),
+                disable_web_page_preview=True,
+            )
+        else:
+            sent_msg = await message.reply(
+                text,
+                reply_markup=subscribed_keyboard(user_id).as_markup(),
+                disable_web_page_preview=True,
+            )
+        
         logging.info(f"📝 Foydalanuvchi {user_id} uchun obuna tugmasi bilan xabarni yubording, message_id={sent_msg.message_id}")
         
         # Schedule reminders
@@ -421,6 +461,13 @@ async def send_daily_check_report(bot: Bot, checked_count: int, muted_count: int
         
         # Send report to owner
         try:
+            # Проверяем, существует ли чат для отправки отчета
+            try:
+                await bot.get_chat(owner_id)
+            except Exception:
+                logging.warning(f"⚠️ Чат {owner_id} недоступен, пропускаю отправку отчета")
+                return
+            
             await bot.send_message(
                 chat_id=owner_id,
                 text=report_text,
@@ -432,6 +479,13 @@ async def send_daily_check_report(bot: Bot, checked_count: int, muted_count: int
             
             # If DM fails, try to send to channel itself
             try:
+                # Проверяем, существует ли канал для отправки отчета
+                try:
+                    await bot.get_chat(CHANNEL_ID)
+                except Exception:
+                    logging.warning(f"⚠️ Канал {CHANNEL_ID} недоступен, пропускаю отправку отчета")
+                    return
+                
                 await bot.send_message(
                     chat_id=CHANNEL_ID,
                     text=report_text,
@@ -558,31 +612,31 @@ async def daily_check_all_members(bot: Bot) -> None:
                 else:
                     logging.info(f"✅ Admin {user_id} is subscribed, no action needed")
             
-            # Send general reminder to the group about subscription requirement
-            if len(unsubscribed_users) > 0:
-                general_reminder = (
-                    f"📢 KUNLIK ESDA QOLING!\n\n"
-                    f"🔴 Guruhda {len(unsubscribed_users)} ta foydalanuvchi kanalga obuna emas!\n\n"
-                    f"📋 Eslatma:\n"
-                    f"• Kanalga obuna bo'lmagan foydalanuvchilar ovozsiz qilindi\n"
-                    f"• Obuna bo'lish uchun yuqoridagi xabarlardagi tugmalarni bosing\n"
-                    f"• Obuna bo'lgandan so'ng \"✅ Men obuna bo'ldim\" tugmasini bosing\n\n"
-                    f"💡 Barcha foydalanuvchilar kanalga obuna bo'lishi shart!"
-                )
-                
-                try:
-                    sent_reminder = await bot.send_message(
-                        chat_id=GROUP_ID,
-                        text=general_reminder,
-                        disable_web_page_preview=True
-                    )
-                    logging.info(f"📢 Sent general reminder to group, message_id={sent_reminder.message_id}")
-                    
-                    # Auto-delete general reminder after 1 hour
-                    asyncio.create_task(delete_message_after(bot, GROUP_ID, sent_reminder.message_id, 3600))
-                    
-                except Exception as e:
-                    logging.error(f"❌ Failed to send general reminder: {e}")
+            # Убираем отправку общего напоминания в группу - эта информация скрыта от участников
+            # if len(unsubscribed_users) > 0:
+            #     general_reminder = (
+            #         f"📢 KUNLIK ESDA QOLING!\n\n"
+            #         f"🔴 Guruhda {len(unsubscribed_users)} ta foydalanuvchi kanalga obuna emas!\n\n"
+            #         f"📋 Eslatma:\n"
+            #         f"• Kanalga obuna bo'lmagan foydalanuvchilar ovozsiz qilindi\n"
+            #         f"• Obuna bo'lish uchun yuqoridagi xabarlardagi tugmalarni bosing\n"
+            #         f"• Obuna bo'lgandan so'ng \"✅ Men obuna bo'ldim\" tugmasini bosing\n\n"
+            #         f"💡 Barcha foydalanuvchilar kanalga obuna bo'lishi shart!"
+            #     )
+            #     
+            #     try:
+            #         sent_reminder = await bot.send_message(
+            #             chat_id=GROUP_ID,
+            #             text=general_reminder,
+            #             disable_web_page_preview=True
+            #         )
+            #         logging.info(f"📢 Sent general reminder to group, message_id={sent_reminder.message_id}")
+            #         
+            #         # Auto-delete general reminder after 1 hour
+            #         asyncio.create_task(delete_message_after(bot, GROUP_ID, sent_reminder.message_id, 3600))
+            #         
+            #     except Exception as e:
+            #         logging.error(f"❌ Failed to send general reminder: {e}")
             
         except Exception as e:
             logging.error(f"❌ Failed to get chat administrators: {e}")
@@ -700,6 +754,13 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
                 f"💡 Obuna bo'lgandan so'ng so'ralish avtomatik ravishda qabul qilinadi!"
             )
         try:
+            # Проверяем, существует ли пользователь для отправки DM
+            try:
+                await bot.get_chat(user_id)
+            except Exception:
+                logging.warning(f"⚠️ Пользователь {user_id} недоступен для DM, пропускаю отправку")
+                return
+            
             await bot.send_message(user_id, text)
             logging.info(f"📱 Уведомление пользователю {user_id} отправлено в DM")
         except Exception as e:
@@ -793,11 +854,21 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
         # Reply to the original join message if available
         try:
             if callback.message and callback.message.reply_to_message:
-                sent = await bot.send_message(
-                    chat_id=chat.id,
-                    text="🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.",
-                    reply_to_message_id=callback.message.reply_to_message.message_id,
-                )
+                # Проверяем, существует ли сообщение для ответа
+                try:
+                    await bot.get_message(chat.id, callback.message.reply_to_message.message_id)
+                except Exception:
+                    logging.warning(f"⚠️ Сообщение {callback.message.reply_to_message.message_id} недоступно для ответа, отправляю без reply")
+                    sent = await bot.send_message(
+                        chat_id=chat.id,
+                        text="🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin."
+                    )
+                else:
+                    sent = await bot.send_message(
+                        chat_id=chat.id,
+                        text="🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.",
+                        reply_to_message_id=callback.message.reply_to_message.message_id,
+                    )
                 logging.info(f"📝 Отправлено приветственное сообщение пользователю {mentioned_user_id}, message_id={sent.message_id}")
             else:
                 sent = await callback.message.answer("🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.")
@@ -839,9 +910,7 @@ async def on_start(message: Message, bot: Bot) -> None:
             f"4️⃣ Kanalga obuna bo'ling: {CHANNEL_LINK}\n"
             f"5️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
             f"6️⃣ Tayyor! Guruhda yozishingiz mumkin\n\n"
-            f"💡 /check buyrug'i bilan obuna holatingizni tekshirishni ishlating\n\n"
-            f"🔧 ADMINISTRATOR BUYRUQLARI:\n"
-            f"• /force_check - Barcha foydalanuvchilarni majburiy tekshirish"
+            f"💡 Obuna holatingizni tekshirish uchun /check buyrug'ini ishlating"
         )
     else:
         text = (
@@ -854,8 +923,15 @@ async def on_start(message: Message, bot: Bot) -> None:
             f"4️⃣ Obligatsion kanalga obuna bo'ling\n"
             f"5️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
             f"6️⃣ Tayyor! Guruhda yozishingiz mumkin\n\n"
-            f"💡 /check buyrug'i bilan obuna holatingizni tekshirishni ishlating"
+            f"💡 Obuna holatingizni tekshirish uchun /check buyrug'ini ishlating"
         )
+    
+    # Проверяем, существует ли пользователь для отправки приветствия
+    try:
+        await bot.get_chat(message.from_user.id)
+    except Exception:
+        logging.warning(f"⚠️ Пользователь {message.from_user.id} недоступен для отправки приветствия")
+        return
     
     await message.answer(text)
     logging.info(f"📝 Отправлено приветственное сообщение пользователю {message.from_user.id}")
@@ -894,7 +970,7 @@ async def on_check(message: Message, bot: Bot) -> None:
                 f"3️⃣ Guruhga qayting\n"
                 f"4️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
                 f"5️⃣ Tayyor! Endi siz yozishingiz mumkin\n\n"
-                f"💡 Obuna bo'lgandan so'ng /check buyrug'ini qayta ishlashingiz mumkin"
+                f"💡 Obuna bo'lgandan so'ng qayta tekshirish uchun /check buyrug'ini ishlating"
             )
         else:
             text = (
@@ -904,8 +980,15 @@ async def on_check(message: Message, bot: Bot) -> None:
                 f"2️⃣ Guruhga qayting\n"
                 f"3️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
                 f"4️⃣ Tayyor! Endi siz yozishingiz mumkin\n\n"
-                f"💡 Obuna bo'lgandan so'ng /check buyrug'ini qayta ishlashingiz mumkin"
+                f"💡 Obuna bo'lgandan so'ng qayta tekshirish uchun /check buyrug'ini ishlating"
             )
+    
+    # Проверяем, существует ли пользователь для отправки результата
+    try:
+        await bot.get_chat(user_id)
+    except Exception:
+        logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки результата")
+        return
     
     await message.answer(text)
     logging.info(f"📝 Отправлен статус подписки для пользователя {user_id}")
@@ -935,9 +1018,77 @@ async def on_force_check(message: Message, bot: Bot) -> None:
     try:
         # Запускаем функцию ежедневной проверки
         await daily_check_all_members(bot)
-        await message.answer("✅ Majburiy tekshirish muvaffaqiyatli yakunlandi!")
+        
+        # Проверяем, существует ли пользователь для отправки результата
+        try:
+            await bot.get_chat(user_id)
+        except Exception:
+            logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки результата")
+            return
+        
+        # Получаем список не подписанных пользователей для отчета
+        try:
+            admins = await bot.get_chat_administrators(GROUP_ID)
+            unsubscribed_users = []
+            
+            for admin in admins:
+                user_id_admin = admin.user.id
+                
+                # Skip bot itself and chat owner
+                if user_id_admin == bot.id or admin.status == "creator":
+                    continue
+                
+                # Check subscription
+                is_sub = await is_user_subscribed(bot, user_id_admin)
+                
+                if not is_sub:
+                    user_info = {
+                        'id': user_id_admin,
+                        'username': admin.user.username,
+                        'first_name': admin.user.first_name,
+                        'last_name': admin.user.last_name,
+                        'status': admin.status
+                    }
+                    unsubscribed_users.append(user_info)
+            
+            # Формируем отчет о не подписанных пользователях
+            if unsubscribed_users:
+                report_text = (
+                    f"📊 MAJBURIY TEKSHIRISH HISOBOTI\n\n"
+                    f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"👥 Guruh: {GROUP_ID}\n\n"
+                    f"❌ OBUNA EMAS FOYDALANUVCHILAR: {len(unsubscribed_users)} ta\n\n"
+                )
+                
+                for i, user in enumerate(unsubscribed_users, 1):
+                    user_display = "Foydalanuvchi"
+                    if user['username']:
+                        user_display = f"@{user['username']}"
+                    elif user['first_name']:
+                        user_display = user['first_name']
+                        if user['last_name']:
+                            user_display += f" {user['last_name']}"
+                    
+                    report_text += f"{i}. {user_display} (ID: {user['id']})\n"
+                
+                await message.answer(report_text)
+            else:
+                await message.answer("✅ Barcha foydalanuvchilar obuna bo'lgan!")
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка при получении списка не подписанных пользователей: {e}")
+            await message.answer("✅ Majburiy tekshirish muvaffaqiyatli yakunlandi!")
+        
     except Exception as e:
         logging.error(f"❌ Ошибка при принудительной проверке: {e}")
+        
+        # Проверяем, существует ли пользователь для отправки ошибки
+        try:
+            await bot.get_chat(user_id)
+        except Exception:
+            logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки ошибки")
+            return
+        
         await message.answer(f"❌ Majburiy tekshirishda xatolik yuz berdi: {e}")
 
 
@@ -965,6 +1116,13 @@ async def on_id(message: Message, bot: Bot) -> None:
             return
     except Exception as e:
         logging.warning(f"⚠️ Не удалось проверить статус пользователя {user_id} для команды /id: {e}")
+
+    # Проверяем, существует ли пользователь для отправки результата
+    try:
+        await bot.get_chat(user_id)
+    except Exception:
+        logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки результата")
+        return
 
     await message.answer(f"chat.id = {chat.id}\nchat.type = {chat.type}")
     logging.info(f"✅ Chat ID информация отправлена администратору {user_id}: chat.id={chat.id}, chat.type={chat.type}")
