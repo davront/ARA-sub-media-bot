@@ -121,29 +121,29 @@ async def auto_check_subscription(bot: Bot, chat_id: int, user_id: int, user_dis
             try:
                 member = await bot.get_chat_member(chat_id, user_id)
                 if not member.is_member or member.status in ["left", "kicked"]:
-                    logging.info(f"🔄 Avtomatik tekshirish: foydalanuvchi {user_id} guruhdan chiqib ketdi, tekshirishlarni to'xtataman")
+                    logging.info(f"🔄 Автопроверка: пользователь {user_id} покинул группу, прекращаю проверки")
                     return
                     
                 # Check if user is still restricted (muted)
                 if hasattr(member, 'is_restricted') and not member.is_restricted:
-                    logging.info(f"🔄 Avtomatik tekshirish: foydalanuvchi {user_id} allaqachon rozmunlandi, tekshirishlarni to'xtataman")
+                    logging.info(f"🔄 Автопроверка: пользователь {user_id} уже размучен, прекращаю проверки")
                     return
                     
             except Exception as e:
-                logging.warning(f"⚠️ Avtomatik tekshirish: foydalanuvchi {user_id} holatini tekshirishda xatolik yuz berdi: {e}")
+                logging.warning(f"⚠️ Автопроверка: не удалось проверить статус пользователя {user_id}: {e}")
                 continue
             
             # Check subscription
-            logging.info(f"🔄 Avtomatik tekshirish #{check_num + 1}: foydalanuvchi {user_id} obunasini tekshiraman")
+            logging.info(f"🔄 Автопроверка #{check_num + 1}: проверяю подписку пользователя {user_id}")
             is_sub = await is_user_subscribed(bot, user_id)
             
             if is_sub:
-                logging.info(f"✅ Avtomatik tekshirish: foydalanuvchi {user_id} obuna bo'ldi, rozmunlayman")
+                logging.info(f"✅ Автопроверка: пользователь {user_id} подписался, размучиваю")
                 
                 try:
                     # Unmute user
                     await unmute_user(bot, chat_id, user_id)
-                    logging.info(f"✅ Avtomatik tekshirish: foydalanuvchi {user_id} muvaffaqiyatli rozmunlandi")
+                    logging.info(f"✅ Автопроверка: успешно размутил пользователя {user_id}")
                     
                     # Send welcome message
                     welcome_text = f"🎉 Avtomatik ravishda obuna topildi!\n\n👤 {user_display_name}, guruhga xush kelibsiz!\n✅ Endi xabar yozishingiz mumkin."
@@ -163,16 +163,16 @@ async def auto_check_subscription(bot: Bot, chat_id: int, user_id: int, user_dis
                     asyncio.create_task(delete_message_after(bot, chat_id, message_id, 10))
                     
                 except Exception as e:
-                    logging.error(f"❌ Avtomatik tekshirish: foydalanuvchi {user_id} rozmunlanib bo'lmadi: {e}")
+                    logging.error(f"❌ Автопроверка: не удалось размутить пользователя {user_id}: {e}")
                 
                 return
             else:
-                logging.info(f"❌ Avtomatik tekshirish #{check_num + 1}: foydalanuvchi {user_id} hali obuna bo'lmagan")
+                logging.info(f"❌ Автопроверка #{check_num + 1}: пользователь {user_id} еще не подписался")
         
-        logging.info(f"⏰ Avtomatik tekshirish: foydalanuvchi {user_id} (5 minut o'tib ketdi) tugadi")
+        logging.info(f"⏰ Автопроверка: завершена для пользователя {user_id} (5 минут истекли)")
         
     except Exception as e:
-        logging.error(f"❌ Avtomatik obuna tekshirishida foydalanuvchi {user_id} xatoligi: {e}")
+        logging.error(f"❌ Ошибка в автопроверке подписки для пользователя {user_id}: {e}")
 
 
 async def send_delayed_reminder(bot: Bot, chat_id: int, user_id: int, user_display_name: str, message_id: int, delay_seconds: int) -> None:
@@ -184,22 +184,22 @@ async def send_delayed_reminder(bot: Bot, chat_id: int, user_id: int, user_displ
         try:
             member = await bot.get_chat_member(chat_id, user_id)
             if not member.is_member or member.status in ["left", "kicked"]:
-                logging.info(f"⏰ Foydalanuvchi {user_id} guruhdan chiqib ketdi, eskirmasini o'tkazaman")
+                logging.info(f"⏰ Пользователь {user_id} покинул группу, пропускаю напоминание")
                 return
                 
             # Check if user is still restricted (muted)
             if hasattr(member, 'is_restricted') and not member.is_restricted:
-                logging.info(f"⏰ Foydalanuvchi {user_id} allaqachon rozmunlandi, eskirmasini o'tkazaman")
+                logging.info(f"⏰ Пользователь {user_id} уже размучен, пропускаю напоминание")
                 return
                 
         except Exception as e:
-            logging.warning(f"⚠️ Foydalanuvchi {user_id} uchun eskirmasini tekshirishda xatolik yuz berdi: {e}")
+            logging.warning(f"⚠️ Не удалось проверить статус пользователя {user_id} для напоминания: {e}")
             return
         
         await send_reminder(bot, chat_id, user_id, user_display_name, message_id)
         
     except Exception as e:
-        logging.error(f"❌ Foydalanuvchi {user_id} uchun eskirmasini jadvalga qo'shishda xatolik yuz berdi: {e}")
+        logging.error(f"❌ Ошибка в планировщике напоминаний для пользователя {user_id}: {e}")
 
 
 async def send_reminder(bot: Bot, chat_id: int, user_id: int, user_display_name: str, message_id: int) -> None:
@@ -253,42 +253,42 @@ def subscribed_keyboard(target_user_id: int = None) -> InlineKeyboardBuilder:
 
 async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Message, user_info: dict = None) -> None:
     """Common logic for handling new members"""
-    logging.info(f"🔍 Yangi foydalanuvchi aniqlandi: user_id={user_id} chat_id={chat_id}")
+    logging.info(f"🔍 Обнаружен новый участник: user_id={user_id} в чате chat_id={chat_id}")
     
     # Skip if this is the bot itself
     if user_id == bot.id:
-        logging.info(f"🤖 Botni o'zini o'tkazaman: user_id={user_id}")
+        logging.info(f"🤖 Пропускаю самого бота: user_id={user_id}")
         return
         
     # Check subscription
-    logging.info(f"📋 Foydalanuvchi {user_id} uchun obunani tekshiraman kanal {CHANNEL_ID}")
+    logging.info(f"📋 Проверяю подписку для user_id={user_id} в канале {CHANNEL_ID}")
     is_sub = await is_user_subscribed(bot, user_id)
-    logging.info(f"📊 Foydalanuvchi {user_id} uchun obuna holati: {'✅ OBUNA' if is_sub else '❌ OBUNA EMAS'}")
+    logging.info(f"📊 Статус подписки для user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
-        logging.info(f"✅ Foydalanuvchi {user_id} allaqachon obuna bo'lgan, ruxsat beraman")
+        logging.info(f"✅ Пользователь {user_id} уже подписан, разрешаю доступ")
         return
 
     # Check if user is chat owner (can't be restricted)
     try:
         member = await bot.get_chat_member(chat_id, user_id)
         member_status = getattr(member, "status", "member")
-        logging.info(f"👑 Foydalanuvchi {user_id} guruhdagi holati: {member_status}")
+        logging.info(f"👑 Статус пользователя {user_id} в группе: {member_status}")
         
         if member_status == "creator":
             # Chat owner - skip muting
-            logging.info(f"👑 Guruh egasi {user_id} - muxtalif qilish mumkin emas")
+            logging.info(f"👑 Пропускаю владельца группы {user_id} - нельзя ограничить")
             return
     except Exception as e:
-        logging.warning(f"⚠️ Foydalanuvchi {user_id} uchun foydalanuvchi holatini olishda xatolik yuz berdi: {e}")
+        logging.warning(f"⚠️ Не удалось получить статус участника для пользователя {user_id}: {e}")
 
     # Mute user and send instruction
-    logging.info(f"🔇 Foydalanuvchi {user_id} obuna emasligi uchun muxtalif qilaman")
+    logging.info(f"🔇 Мутирую пользователя {user_id} за отсутствие подписки")
     try:
         await mute_user(bot, chat_id, user_id)
-        logging.info(f"✅ Foydalanuvchi {user_id} muxtalif qildim")
+        logging.info(f"✅ Успешно замьютил пользователя {user_id}")
     except Exception as e:
-        logging.error(f"❌ Foydalanuvchi {user_id} muxtalif qilib bo'lmadi: {e}")
+        logging.error(f"❌ Не удалось замьютить пользователя {user_id}: {e}")
 
     # Get user display name
     user_display_name = "Foydalanuvchi"  # fallback
@@ -592,19 +592,19 @@ async def start_daily_checker(bot: Bot) -> None:
 @router.message(F.new_chat_members)
 async def on_new_chat_members(message: Message, bot: Bot) -> None:
     """Handle new members joining via invite links"""
-    logging.info(f"👥 Yangi foydalanuvchilar guruhdagi chat_id={message.chat.id} holatini aniqladi")
+    logging.info(f"👥 Обнаружены новые участники в чате chat_id={message.chat.id} в группе {GROUP_ID}")
     
     if GROUP_ID is not None and message.chat.id != GROUP_ID:
-        logging.info(f"⚠️ Chat {message.chat.id} o'tkazaman - guruhdan farq qiluvchi {GROUP_ID}")
+        logging.info(f"⚠️ Чат {message.chat.id} переадресуем - группа {GROUP_ID} отличается")
         return
 
     if not message.new_chat_members:
-        logging.info("⚠️ Chatda yangi foydalanuvchilar topilmadi")
+        logging.info("⚠️ В чате не обнаружены новые участники")
         return
 
-    logging.info(f"📋 {len(message.new_chat_members)} yangi foydalanuvchilarni qayta ishlayman")
+    logging.info(f"📋 {len(message.new_chat_members)} новых участников, которые нужно обработать")
     for user in message.new_chat_members:
-        logging.info(f"👤 Yangi foydalanuvchini qayta ishlayman: {user.first_name} (@{user.username}) user_id={user.id}")
+        logging.info(f"👤 Обрабатываю нового участника: {user.first_name} (@{user.username}) user_id={user.id}")
         user_info = {
             'username': user.username,
             'first_name': user.first_name,
@@ -616,24 +616,24 @@ async def on_new_chat_members(message: Message, bot: Bot) -> None:
 @router.chat_join_request()
 async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
     """Handle join requests (when group requires approval)"""
-    logging.info(f"📝 Kirish so'ralishi user_id={event.from_user.id} chat_id={event.chat.id} holatini aniqladi")
+    logging.info(f"📝 Запрос на вступление user_id={event.from_user.id} chat_id={event.chat.id} в группу {GROUP_ID}")
     
     if GROUP_ID is not None and event.chat.id != GROUP_ID:
-        logging.info(f"⚠️ Chat {event.chat.id} o'tkazaman - guruhdan farq qiluvchi {GROUP_ID}")
+        logging.info(f"⚠️ Чат {event.chat.id} переадресуем - группа {GROUP_ID} отличается")
         return
 
     user_id = event.from_user.id
-    logging.info(f"📋 Foydalanuvchi {user_id} uchun obunani tekshiraman")
+    logging.info(f"📋 Проверяю подписку для user_id={user_id}")
     is_sub = await is_user_subscribed(bot, user_id)
-    logging.info(f"📊 Foydalanuvchi {user_id} uchun obuna holati: {'✅ OBUNA' if is_sub else '❌ OBUNA EMAS'}")
+    logging.info(f"📊 Статус подписки для user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
         # Approve the request
-        logging.info(f"✅ Kirish so'ralishi {user_id} uchun qabul qilindi")
+        logging.info(f"✅ Запрос на вступление {user_id} принят")
         await bot.approve_chat_join_request(chat_id=event.chat.id, user_id=user_id)
     else:
         # Decline the request
-        logging.info(f"❌ Kirish so'ralishi {user_id} uchun rad etildi")
+        logging.info(f"❌ Запрос на вступление {user_id} отклонен")
         await bot.decline_chat_join_request(chat_id=event.chat.id, user_id=user_id)
         
         # Try to notify user in DM
@@ -647,56 +647,56 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
         
         if CHANNEL_LINK:
             text = (
-                f"🔴 VARNING! Sizning kirish so'ralishi rad etildi!\n\n"
+                f"🔴 DIQQAT! Sizning kirish so'ralishi rad etildi!\n\n"
                 f"👤 {user_display_name}, guruhdaga kirish uchun:\n\n"
-                f"📋 QO'LLAB-QO'LLAB TAYYORLASH:\n\n"
+                f"📋 QADAMMA-QADAM KO'RSATMALAR:\n\n"
                 f"1️⃣ Linkni bosing: {CHANNEL_LINK}\n"
                 f"2️⃣ \"Obuna bo'lish\" / \"Join\" tugmasini bosing\n"
                 f"3️⃣ Guruhga qayting\n"
                 f"4️⃣ Yangi so'ralishni yuboring\n"
-                f"5️⃣ Tugatildi! Avtomatik kirishga ruxsat beriladi\n\n"
+                f"5️⃣ Tayyor! Avtomatik kirishga ruxsat beriladi\n\n"
                 f"💡 Obuna bo'lgandan so'ng so'ralish avtomatik ravishda qabul qilinadi!"
             )
         else:
             text = (
-                f"🔴 VARNING! Sizning kirish so'ralishi rad etildi!\n\n"
+                f"🔴 DIQQAT! Sizning kirish so'ralishi rad etildi!\n\n"
                 f"👤 {user_display_name}, guruhdaga kirish uchun:\n\n"
-                f"📋 QO'LLAB-QO'LLAB TAYYORLASH:\n\n"
+                f"📋 QADAMMA-QADAM KO'RSATMALAR:\n\n"
                 f"1️⃣ Obligatsion kanalga obuna bo'ling\n"
                 f"2️⃣ Guruhga qayting\n"
                 f"3️⃣ Yangi so'ralishni yuboring\n"
-                f"4️⃣ Tugatildi! Avtomatik kirishga ruxsat beriladi\n\n"
+                f"4️⃣ Tayyor! Avtomatik kirishga ruxsat beriladi\n\n"
                 f"💡 Obuna bo'lgandan so'ng so'ralish avtomatik ravishda qabul qilinadi!"
             )
         try:
             await bot.send_message(user_id, text)
-            logging.info(f"📱 Foydalanuvchi {user_id} uchun xabarni DMga yubording")
+            logging.info(f"📱 Уведомление пользователю {user_id} отправлено в DM")
         except Exception as e:
-            logging.warning(f"⚠️ Foydalanuvchi {user_id} uchun DMga xabarni yuborib bo'lmadi: {e}")
+            logging.warning(f"⚠️ Не удалось отправить сообщение пользователю {user_id} в DM: {e}")
 
 
 @router.callback_query(F.data.startswith("i_subscribed"))
 async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
-    logging.info(f"🔘 Tugma 'Obuna bo'ldim' foydalanuvchi user_id={callback.from_user.id} chat_id={callback.message.chat.id if callback.message else 'nomalum'} holatini aniqladi")
+    logging.info(f"🔘 Кнопка 'Подписался' пользователя user_id={callback.from_user.id} chat_id={callback.message.chat.id if callback.message else 'неизвестно'} в группе {GROUP_ID}")
     
     chat = callback.message.chat if callback.message else None
     if chat is None:
-        logging.warning("⚠️ Chat haqida ma'lumot yo'q kollabekda")
+        logging.warning("⚠️ Нет информации о чате")
         await callback.answer()
         return
 
     if GROUP_ID is not None and chat.id != GROUP_ID:
-        logging.info(f"⚠️ Tugma guruhdagi {chat.id} ga boshlandi, {GROUP_ID} kutildi")
+        logging.info(f"⚠️ Кнопка перешла к чату {chat.id}, {GROUP_ID} ожидалось")
         await callback.answer()
         return
 
     user_id = callback.from_user.id
-    logging.info(f"🔍 Tugmani bosishni qayta ishlayman foydalanuvchi user_id={user_id}")
+    logging.info(f"🔍 Обрабатываю нажатие кнопки пользователя user_id={user_id}")
     
-    # Extract target user ID from callback data
+    # Извлекаем ID упомянутого пользователя из callback_data
     callback_data = callback.data
     if callback_data == "i_subscribed":
-        # Fallback for old format - try to get from reply_to_message
+        # Fallback для старого формата - пытаемся получить из reply_to_message
         if callback.message and callback.message.reply_to_message:
             mention_pattern = r'tg://user\?id=(\d+)'
             reply_text = callback.message.reply_to_message.text
@@ -704,60 +704,60 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
                 match = re.search(mention_pattern, reply_text)
                 if match:
                     mentioned_user_id = int(match.group(1))
-                    logging.info(f"📝 Eski formatni qo'llab-quvvatlash: tugma {mentioned_user_id} uchun mo'ljallangan edi")
+                    logging.info(f"📝 Поддержка старого формата: кнопка была для user_id {mentioned_user_id}")
                 else:
-                    logging.warning(f"⚠️ Foydalanuvchi uchun tugma matni bo'ylab foydalanuvchi topilmadi: {user_id}")
-                    await callback.answer("Xatolik: tugma uchun kimligini aniqlab bo'lmadi", show_alert=True)
+                    logging.warning(f"⚠️ Не удалось найти пользователя по тексту кнопки для user_id {user_id}")
+                    await callback.answer("Ошибка: не удалось определить ID пользователя", show_alert=True)
                     return
             else:
-                logging.warning(f"⚠️ reply_to_message.text {user_id} uchun None")
-                await callback.answer("Xatolik: tugma uchun kimligini aniqlab bo'lmadi", show_alert=True)
+                logging.warning(f"⚠️ reply_to_message.text для user_id {user_id} равен None")
+                await callback.answer("Ошибка: не удалось определить ID пользователя", show_alert=True)
                 return
         else:
-            logging.warning(f"⚠️ Eski format uchun tugma uchun reply_to_message yo'q")
-            await callback.answer("Xatolik: tugma uchun kimligini aniqlab bo'lmadi", show_alert=True)
+            logging.warning(f"⚠️ Для старого формата кнопки reply_to_message отсутствует")
+            await callback.answer("Ошибка: не удалось определить ID пользователя", show_alert=True)
             return
     else:
-        # New format: i_subscribed_123456
+        # Новый формат: i_subscribed_123456
         try:
             mentioned_user_id = int(callback_data.split("_")[-1])
-            logging.info(f"📝 Yangi format: tugma {mentioned_user_id} uchun mo'ljallangan edi")
+            logging.info(f"📝 Новый формат: кнопка была для user_id {mentioned_user_id}")
         except (ValueError, IndexError):
-            logging.error(f"❌ Noto'g'ri kallback_data formati: {callback_data}")
-            await callback.answer("Xatolik: noto'g'ri tugma formati", show_alert=True)
+            logging.error(f"❌ Неверный формат callback_data: {callback_data}")
+            await callback.answer("Ошибка: неверный формат кнопки", show_alert=True)
             return
     
-    # Check if this user is the one who was mentioned in the button
-    logging.info(f"📝 Tugma {mentioned_user_id} uchun mo'ljallangan edi, foydalanuvchi {user_id} bosdi")
+    # Проверяем, является ли нажавший пользователь тем, кто был упомянут в кнопке
+    logging.info(f"📝 Кнопка была для user_id {mentioned_user_id}, пользователь {user_id} нажал")
     if user_id != mentioned_user_id:
-        logging.warning(f"🚫 Noto'g'ri foydalanuvchi {user_id} tugmani bosdi, {mentioned_user_id} uchun mo'ljallangan edi")
-        await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
+        logging.warning(f"🚫 Неверный пользователь {user_id} нажал кнопку, она была для user_id {mentioned_user_id}")
+        await callback.answer("Эта кнопка не для вас!", show_alert=True)
         return
-    logging.info(f"✅ To'g'ri foydalanuvchi {user_id} o'z tugmasini bosdi")
+    logging.info(f"✅ Верный пользователь {user_id} нажал свою кнопку")
     
-    # Now check subscription of the mentioned user (who should be unmuted)
-    logging.info(f"📋 Foydalanuvchi {mentioned_user_id} uchun obunani tekshiraman")
+    # Теперь проверяем подписку упомянутого пользователя (который должен быть размучен)
+    logging.info(f"📋 Проверяю подписку для user_id={mentioned_user_id}")
     is_sub = await is_user_subscribed(bot, mentioned_user_id)
-    logging.info(f"📊 Foydalanuvchi {mentioned_user_id} uchun obuna holati: {'✅ OBUNA' if is_sub else '❌ OBUNA EMAS'}")
+    logging.info(f"📊 Статус подписки для user_id={mentioned_user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
         try:
-            # Check if mentioned user is chat owner (can't be restricted)
+            # Проверяем, является ли упомянутый пользователь владельцем чата (нельзя ограничить)
             member = await bot.get_chat_member(chat.id, mentioned_user_id)
             member_status = getattr(member, "status", "member")
-            logging.info(f"👑 Foydalanuvchi {mentioned_user_id} guruhdagi holati: {member_status}")
+            logging.info(f"👑 Статус пользователя {mentioned_user_id} в группе: {member_status}")
             
             if member_status == "creator":
-                # Chat owner - just send welcome message without unmuting
-                logging.info(f"👑 Guruh egasi {mentioned_user_id} obuna tasdiqladi")
-                await callback.answer("Obuna tasdiqlandi")
+                # Владелец чата - просто отправляем приветственное сообщение без размучения
+                logging.info(f"👑 Владелец группы {mentioned_user_id} подтвердил подписку")
+                await callback.answer("Подписка подтверждена")
                 return
             
-            logging.info(f"🔓 Foydalanuvchi {mentioned_user_id} obuna tasdiqlangandan so'ng rozmunlayman")
+            logging.info(f"🔓 Размучиваю пользователя {mentioned_user_id} после подтверждения подписки")
             await unmute_user(bot, chat.id, mentioned_user_id)
-            logging.info(f"✅ Foydalanuvchi {mentioned_user_id} muxtalif qildim")
+            logging.info(f"✅ Успешно размутил пользователя {mentioned_user_id}")
         except Exception as e:
-            logging.error(f"❌ Foydalanuvchi {mentioned_user_id} muxtalif qilib bo'lmadi: {e}")
+            logging.error(f"❌ Не удалось размутить пользователя {mentioned_user_id}: {e}")
         
         # Reply to the original join message if available
         try:
@@ -767,47 +767,47 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
                     text="🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.",
                     reply_to_message_id=callback.message.reply_to_message.message_id,
                 )
-                logging.info(f"📝 Foydalanuvchi {mentioned_user_id} uchun xush kelish xabarni yubording, message_id={sent.message_id}")
+                logging.info(f"📝 Отправлено приветственное сообщение пользователю {mentioned_user_id}, message_id={sent.message_id}")
             else:
                 sent = await callback.message.answer("🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.")
-                logging.info(f"📝 Foydalanuvchi {mentioned_user_id} uchun xush kelish xabarni yubording, message_id={sent.message_id}")
+                logging.info(f"📝 Отправлено приветственное сообщение пользователю {mentioned_user_id}, message_id={sent.message_id}")
             
-            # Schedule deletion of the greeting too
-            logging.info(f"⏰ Xush kelish xabarni {sent.message_id} 10 sekund ichida o'chirishni jadvalga qo'shaman")
+            # Планируем удаление приветственного сообщения
+            logging.info(f"⏰ Удаляю приветственное сообщение {sent.message_id} через 10 секунд")
             asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
         except Exception as e:
-            logging.error(f"❌ Foydalanuvchi {mentioned_user_id} uchun xush kelish xabarni yuborib bo'lmadi: {e}")
+            logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {mentioned_user_id}: {e}")
         
-        # Schedule deletion of the subscribe prompt message (with the button)
+        # Планируем удаление сообщения с призывом к подписке (с кнопкой)
         try:
-            logging.info(f"⏰ Tugma bilan xabarni {callback.message.message_id} 10 sekund ichida o'chirishni jadvalga qo'shaman")
+            logging.info(f"⏰ Удаляю сообщение с кнопкой {callback.message.message_id} через 10 секунд")
             asyncio.create_task(delete_message_after(bot, chat.id, callback.message.message_id, 10))
         except Exception as e:
-            logging.error(f"❌ Tugma bilan xabarni jadvalga qo'shishda xatolik yuz berdi: {e}")
+            logging.error(f"❌ Ошибка при добавлении сообщения к удалению: {e}")
         
         await callback.answer("Obuna tasdiqlandi")
-        logging.info(f"✅ Obuna tasdiqlandi foydalanuvchi {mentioned_user_id} uchun")
+        logging.info(f"✅ Подписка подтверждена для пользователя {mentioned_user_id}")
     else:
-        logging.warning(f"⚠️ Tugma bilan foydalanuvchi {mentioned_user_id} obuna emas")
-        await callback.answer("Foydalanuvchi hali obuna emas", show_alert=False)
+        logging.warning(f"⚠️ Пользователь {mentioned_user_id} не подписан")
+        await callback.answer("Foydalanuvchi hali obuna bo'lmagan", show_alert=False)
 
 
 @router.message(CommandStart())
 async def on_start(message: Message, bot: Bot) -> None:
     """Handle /start command"""
-    logging.info(f"🚀 /start buyrug'i foydalanuvchi user_id={message.from_user.id} holatini aniqladi")
+    logging.info(f"🚀 Команда /start пользователя user_id={message.from_user.id} в группе {GROUP_ID}")
     
     if CHANNEL_LINK:
         text = (
             f"👋 Salom, {message.from_user.first_name or 'foydalanuvchi'}!\n\n"
             f"📺 Bu bot kanal obuna tekshirish uchun.\n\n"
-            f"📋 BOT QANDAY ISHLAYDI:\n\n"
+            f"📋 BOT QANDAY ISHLASHI:\n\n"
             f"1️⃣ Guruhga qo'shiling\n"
             f"2️⃣ Bot sizning obunangizni tekshiradi\n"
             f"3️⃣ Agar obuna emas bo'lsangiz, muxtalif qilinasiz\n"
             f"4️⃣ Kanalga obuna bo'ling: {CHANNEL_LINK}\n"
             f"5️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
-            f"6️⃣ Tugatildi! Guruhda yozishingiz mumkin\n\n"
+            f"6️⃣ Tayyor! Guruhda yozishingiz mumkin\n\n"
             f"💡 /check buyrug'i bilan obuna holatingizni tekshirishni ishlating\n\n"
             f"🔧 ADMINISTRATOR BUYRUQLARI:\n"
             f"• /force_check - Barcha foydalanuvchilarni majburiy tekshirish"
@@ -816,33 +816,33 @@ async def on_start(message: Message, bot: Bot) -> None:
         text = (
             f"👋 Salom, {message.from_user.first_name or 'foydalanuvchi'}!\n\n"
             f"📺 Bu bot obligatsion kanal uchun.\n\n"
-            f"📋 BOT QANDAY ISHLAYDI:\n\n"
+            f"📋 BOT QANDAY ISHLASHI:\n\n"
             f"1️⃣ Guruhga qo'shiling\n"
             f"2️⃣ Bot sizning obunangizni tekshiradi\n"
             f"3️⃣ Agar obuna emas bo'lsangiz, muxtalif qilinasiz\n"
             f"4️⃣ Obligatsion kanalga obuna bo'ling\n"
             f"5️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
-            f"6️⃣ Tugatildi! Guruhda yozishingiz mumkin\n\n"
+            f"6️⃣ Tayyor! Guruhda yozishingiz mumkin\n\n"
             f"💡 /check buyrug'i bilan obuna holatingizni tekshirishni ishlating"
         )
     
     await message.answer(text)
-    logging.info(f"📝 Foydalanuvchi {message.from_user.id} uchun xush kelish xabarni yubording")
+    logging.info(f"📝 Отправлено приветственное сообщение пользователю {message.from_user.id}")
 
 
 @router.message(Command("check"))
 async def on_check(message: Message, bot: Bot) -> None:
     """Handle /check command"""
-    logging.info(f"🔍 /check buyrug'i foydalanuvchi user_id={message.from_user.id} holatini aniqladi")
+    logging.info(f"🔍 Команда /check пользователя user_id={message.from_user.id} в группе {GROUP_ID}")
     
     if message.chat.type != "private":
-        logging.info(f"⚠️ /check buyrug'i shaxsiy chatda boshlandi, o'tkazaman")
+        logging.info(f"⚠️ Команда /check использована в личном чате, переадресуем")
         return
     
     user_id = message.from_user.id
-    logging.info(f"📋 Foydalanuvchi {user_id} uchun obunani /check buyrug'i uchun tekshiraman")
+    logging.info(f"📋 Проверяю подписку для user_id={user_id}")
     is_sub = await is_user_subscribed(bot, user_id)
-    logging.info(f"📊 Foydalanuvchi {user_id} uchun obuna holati: {'✅ OBUNA' if is_sub else '❌ OBUNA EMAS'}")
+    logging.info(f"📊 Статус подписки для user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
         text = (
@@ -862,7 +862,7 @@ async def on_check(message: Message, bot: Bot) -> None:
                 f"2️⃣ \"Obuna bo'lish\" / \"Join\" tugmasini bosing\n"
                 f"3️⃣ Guruhga qayting\n"
                 f"4️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
-                f"5️⃣ Tugatildi! Endi siz yozishingiz mumkin\n\n"
+                f"5️⃣ Tayyor! Endi siz yozishingiz mumkin\n\n"
                 f"💡 Obuna bo'lgandan so'ng /check buyrug'ini qayta ishlashingiz mumkin"
             )
         else:
@@ -872,71 +872,71 @@ async def on_check(message: Message, bot: Bot) -> None:
                 f"1️⃣ Obligatsion kanalga obuna bo'ling\n"
                 f"2️⃣ Guruhga qayting\n"
                 f"3️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
-                f"4️⃣ Tugatildi! Endi siz yozishingiz mumkin\n\n"
+                f"4️⃣ Tayyor! Endi siz yozishingiz mumkin\n\n"
                 f"💡 Obuna bo'lgandan so'ng /check buyrug'ini qayta ishlashingiz mumkin"
             )
     
     await message.answer(text)
-    logging.info(f"📝 Foydalanuvchi {user_id} uchun obuna holati natijasini yubording")
+    logging.info(f"📝 Отправлен статус подписки для пользователя {user_id}")
 
 
 @router.message(Command("force_check"))
 async def on_force_check(message: Message, bot: Bot) -> None:
     """Handle /force_check command - force check all group members"""
-    logging.info(f"🔍 Force check command from user {message.from_user.id}")
+    logging.info(f"🔍 Команда /force_check от пользователя {message.from_user.id} в группе {GROUP_ID}")
     
     if message.chat.type != "private":
-        logging.info(f"⚠️ Force check command used not in private chat, skipping")
+        logging.info(f"⚠️ Команда /force_check использована не в личном чате, пропускаем")
         return
     
     user_id = message.from_user.id
     
-    # Check if user is bot owner (you can modify this logic)
-    # For now, we'll allow any user in private chat to use this command
-    # You can add specific user ID checks here if needed
+    # Проверяем, является ли пользователь владельцем бота (вы можете изменить логику)
+    # На данный момент разрешаем любому пользователю в личном чате использовать эту команду
+    # Вы можете добавить конкретные проверки ID пользователя здесь, если это необходимо
     
     if not GROUP_ID:
-        await message.answer("❌ GROUP_ID not configured, cannot perform force check")
+        await message.answer("❌ GROUP_ID sozlanmagan, majburiy tekshirish amalga oshirilmaydi")
         return
     
-    await message.answer("🔄 Starting force check of all group members... This may take a while.")
+    await message.answer("🔄 Barcha guruh a'zolarini majburiy tekshirishni boshlayman... Bu biroz vaqt olishi mumkin.")
     
     try:
-        # Run the daily check function
+        # Запускаем функцию ежедневной проверки
         await daily_check_all_members(bot)
-        await message.answer("✅ Force check completed successfully!")
+        await message.answer("✅ Majburiy tekshirish muvaffaqiyatli yakunlandi!")
     except Exception as e:
-        logging.error(f"❌ Error during force check: {e}")
-        await message.answer(f"❌ Error during force check: {e}")
+        logging.error(f"❌ Ошибка при принудительной проверке: {e}")
+        await message.answer(f"❌ Majburiy tekshirishda xatolik yuz berdi: {e}")
 
 
 @router.message(Command("id"))
 async def on_id(message: Message, bot: Bot) -> None:
     user_id = message.from_user.id
     chat = message.chat
-    logging.info(f"🆔 /id buyrug'i foydalanuvchi user_id={user_id} chat_id={chat.id}, chat_type={chat.type} holatini aniqladi")
+    logging.info(f"🆔 Команда /id пользователя user_id={user_id} chat_id={chat.id}, chat_type={chat.type} в группе {GROUP_ID}")
     
-    # Only respond in groups/supergroups
+    # Отвечаем только в группах/супергруппах
     if chat.type not in ("group", "supergroup"):
-        logging.info(f"⚠️ /id buyrug'i noto'g'ri chat turida ishlatilgan: {chat.type}")
-        await message.answer("Bu buyruq faqat guruhdada ishlaydi.")
+        logging.info(f"⚠️ Команда /id использована в неправильном типе чата: {chat.type}")
+        await message.answer("Bu buyruq faqat guruhlarda ishlaydi.")
         return
 
-    # Additionally, require that the user be an admin/creator (to not spam)
+    # Дополнительно требуем, чтобы пользователь был администратором/создателем (чтобы не спамить)
     try:
         member = await bot.get_chat_member(chat.id, user_id)
         member_status = getattr(member, "status", "member")
-        logging.info(f"👑 Foydalanuvchi {user_id} guruhdagi holati: {member_status}")
+        logging.info(f"👑 Статус пользователя {user_id} в группе: {member_status}")
         
         if member_status not in ("administrator", "creator"):
-            logging.warning(f"🚫 Noto'g'ri foydalanuvchi {user_id} /id buyrug'ini ishlatmoqchi edi")
-            await message.answer("Bu buyruq faqat guruhdagi administratorlarga murojaat qilishi mumkin.")
+            logging.warning(f"🚫 Неверный пользователь {user_id} пытался использовать команду /id")
+            await message.answer("Bu buyruq faqat guruh administratorlari uchun mavjud.")
             return
     except Exception as e:
-        logging.warning(f"⚠️ Foydalanuvchi {user_id} uchun /id buyrug'i uchun foydalanuvchi holatini tekshirishda xatolik yuz berdi: {e}")
+        logging.warning(f"⚠️ Не удалось проверить статус пользователя {user_id} для команды /id: {e}")
 
     await message.answer(f"chat.id = {chat.id}\nchat.type = {chat.type}")
-    logging.info(f"✅ Chat ID ma'lumotini administrator {user_id} uchun yubording: chat.id={chat.id}, chat.type={chat.type}")
+    logging.info(f"✅ Chat ID информация отправлена администратору {user_id}: chat.id={chat.id}, chat.type={chat.type}")
 
 
 async def main() -> None:
@@ -945,15 +945,15 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(router)
 
-    # Drop pending updates
+    # Отбрасываем ожидающие обновления
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Start the bot
-    logging.info("🚀 Starting bot...")
+    # Запускаем бота
+    logging.info("🚀 Запускаем бота...")
     
-    # Start daily checker task
+    # Запускаем задачу ежедневной проверки
     asyncio.create_task(start_daily_checker(bot))
-    logging.info("⏰ Daily checker task started")
+    logging.info("⏰ Задача ежедневной проверки запущена")
     
     await dp.start_polling(bot)
 
