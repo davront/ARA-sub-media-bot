@@ -339,6 +339,112 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
         logging.error(f"❌ Foydalanuvchi {user_id} uchun xabarni obuna tugmasi bilan yuborib bo'lmadi: {e}")
 
 
+async def send_daily_check_report(bot: Bot, checked_count: int, muted_count: int, already_muted_count: int, unsubscribed_users: list) -> None:
+    """Send daily check report to channel owner"""
+    try:
+        # Try to get channel owner info
+        if not CHANNEL_ID:
+            logging.warning("⚠️ CHANNEL_ID not set, cannot send report to owner")
+            return
+        
+        # Get channel info to find owner
+        try:
+            chat_info = await bot.get_chat(CHANNEL_ID)
+            if not chat_info:
+                logging.warning("⚠️ Could not get channel info")
+                return
+        except Exception as e:
+            logging.warning(f"⚠️ Could not get channel info: {e}")
+            return
+        
+        # Try to find channel owner
+        owner_id = None
+        
+        # Method 1: Try to get from chat info
+        if hasattr(chat_info, 'id') and chat_info.id:
+            try:
+                # Get chat administrators to find owner
+                admins = await bot.get_chat_administrators(CHANNEL_ID)
+                for admin in admins:
+                    if admin.status == "creator":
+                        owner_id = admin.user.id
+                        break
+            except Exception as e:
+                logging.warning(f"⚠️ Could not get channel admins: {e}")
+        
+        # Method 2: If we have a specific owner ID in environment, use it
+        # You can add OWNER_ID to your .env file
+        if not owner_id:
+            import os
+            owner_id = os.getenv('OWNER_ID')
+            if owner_id:
+                try:
+                    owner_id = int(owner_id)
+                except ValueError:
+                    owner_id = None
+        
+        if not owner_id:
+            logging.warning("⚠️ Could not determine channel owner ID, skipping report")
+            return
+        
+        # Prepare report message
+        report_text = (
+            f"📊 KUNLIK OBUNA TEKSHIRISH HISOBOTI\n\n"
+            f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"👥 Guruh: {GROUP_ID}\n\n"
+            f"📋 NATIJALAR:\n"
+            f"✅ Tekshirilgan: {checked_count} foydalanuvchi\n"
+            f"🔇 Yangi muxtalif qilingan: {muted_count} foydalanuvchi\n"
+            f"🔇 Oldin muxtalif qilingan: {already_muted_count} foydalanuvchi\n"
+            f"❌ Obuna emas: {len(unsubscribed_users)} foydalanuvchi\n\n"
+        )
+        
+        if unsubscribed_users:
+            report_text += f"📝 OBUNA EMAS FOYDALANUVCHILAR:\n\n"
+            
+            # Group users by status for better readability
+            for i, user in enumerate(unsubscribed_users[:50], 1):  # Limit to 50 users
+                user_display = "Foydalanuvchi"
+                if user['username']:
+                    user_display = f"@{user['username']}"
+                elif user['first_name']:
+                    user_display = user['first_name']
+                    if user['last_name']:
+                        user_display += f" {user['last_name']}"
+                
+                report_text += f"{i}. {user_display} (ID: {user['id']})\n"
+            
+            if len(unsubscribed_users) > 50:
+                report_text += f"\n... va {len(unsubscribed_users) - 50} ta boshqa foydalanuvchi\n"
+        else:
+            report_text += "🎉 Barcha foydalanuvchilar obuna bo'lgan!"
+        
+        # Send report to owner
+        try:
+            await bot.send_message(
+                chat_id=owner_id,
+                text=report_text,
+                parse_mode="HTML"
+            )
+            logging.info(f"📊 Daily check report sent to channel owner {owner_id}")
+        except Exception as e:
+            logging.error(f"❌ Failed to send report to owner {owner_id}: {e}")
+            
+            # If DM fails, try to send to channel itself
+            try:
+                await bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=report_text,
+                    parse_mode="HTML"
+                )
+                logging.info(f"📊 Daily check report sent to channel {CHANNEL_ID} instead of owner")
+            except Exception as e2:
+                logging.error(f"❌ Failed to send report to channel {CHANNEL_ID}: {e2}")
+        
+    except Exception as e:
+        logging.error(f"❌ Error sending daily check report: {e}")
+
+
 async def daily_check_all_members(bot: Bot) -> None:
     """Daily check all group members for subscription status"""
     if not GROUP_ID:
@@ -358,6 +464,7 @@ async def daily_check_all_members(bot: Bot) -> None:
         checked_count = 0
         muted_count = 0
         already_muted_count = 0
+        unsubscribed_users = []  # Collect info about unsubscribed users
         
         for member in chat_members:
             user_id = member.user.id
@@ -383,6 +490,16 @@ async def daily_check_all_members(bot: Bot) -> None:
             is_sub = await is_user_subscribed(bot, user_id)
             
             if not is_sub:
+                # Collect user info for report
+                user_info = {
+                    'id': user_id,
+                    'username': member.user.username,
+                    'first_name': member.user.first_name,
+                    'last_name': member.user.last_name,
+                    'status': member.status
+                }
+                unsubscribed_users.append(user_info)
+                
                 # Check if user is already muted
                 if hasattr(member, 'is_restricted') and member.is_restricted:
                     already_muted_count += 1
@@ -439,6 +556,9 @@ async def daily_check_all_members(bot: Bot) -> None:
                     logging.error(f"❌ Failed to mute user {user_id} during daily check: {e}")
             else:
                 logging.info(f"✅ User {user_id} is subscribed, no action needed")
+        
+        # Send report to channel owner
+        await send_daily_check_report(bot, checked_count, muted_count, already_muted_count, unsubscribed_users)
         
         logging.info(f"✅ Daily check completed: {checked_count} members checked, {muted_count} newly muted, {already_muted_count} already muted")
         
@@ -688,7 +808,9 @@ async def on_start(message: Message, bot: Bot) -> None:
             f"4️⃣ Kanalga obuna bo'ling: {CHANNEL_LINK}\n"
             f"5️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
             f"6️⃣ Tugatildi! Guruhda yozishingiz mumkin\n\n"
-            f"💡 /check buyrug'i bilan obuna holatingizni tekshirishni ishlating"
+            f"💡 /check buyrug'i bilan obuna holatingizni tekshirishni ishlating\n\n"
+            f"🔧 ADMINISTRATOR BUYRUQLARI:\n"
+            f"• /force_check - Barcha foydalanuvchilarni majburiy tekshirish"
         )
     else:
         text = (
@@ -756,6 +878,36 @@ async def on_check(message: Message, bot: Bot) -> None:
     
     await message.answer(text)
     logging.info(f"📝 Foydalanuvchi {user_id} uchun obuna holati natijasini yubording")
+
+
+@router.message(Command("force_check"))
+async def on_force_check(message: Message, bot: Bot) -> None:
+    """Handle /force_check command - force check all group members"""
+    logging.info(f"🔍 Force check command from user {message.from_user.id}")
+    
+    if message.chat.type != "private":
+        logging.info(f"⚠️ Force check command used not in private chat, skipping")
+        return
+    
+    user_id = message.from_user.id
+    
+    # Check if user is bot owner (you can modify this logic)
+    # For now, we'll allow any user in private chat to use this command
+    # You can add specific user ID checks here if needed
+    
+    if not GROUP_ID:
+        await message.answer("❌ GROUP_ID not configured, cannot perform force check")
+        return
+    
+    await message.answer("🔄 Starting force check of all group members... This may take a while.")
+    
+    try:
+        # Run the daily check function
+        await daily_check_all_members(bot)
+        await message.answer("✅ Force check completed successfully!")
+    except Exception as e:
+        logging.error(f"❌ Error during force check: {e}")
+        await message.answer(f"❌ Error during force check: {e}")
 
 
 @router.message(Command("id"))
