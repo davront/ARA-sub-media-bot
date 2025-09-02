@@ -459,22 +459,17 @@ async def daily_check_all_members(bot: Bot) -> None:
         try:
             # Get chat administrators first to find owner
             admins = await bot.get_chat_administrators(GROUP_ID)
+            chat_members.extend(admins)
             
-            # Get regular members (this will get up to 200 members)
-            # Note: Telegram API limits to 200 members per request
-            async for member in bot.get_chat_members(GROUP_ID, limit=200):
-                chat_members.append(member)
+            # Note: Telegram API doesn't provide a direct way to get all members
+            # We'll work with administrators for now, and can add more logic later
+            # For now, we'll check only administrators and any new members that join
+            
+            logging.info(f"📋 Using administrators as primary members to check: {len(chat_members)} members")
                 
         except Exception as e:
-            logging.error(f"❌ Failed to get chat members: {e}")
-            # Fallback: try to get administrators only
-            try:
-                admins = await bot.get_chat_administrators(GROUP_ID)
-                chat_members = admins
-                logging.info(f"⚠️ Using administrators only as fallback: {len(chat_members)} members")
-            except Exception as e2:
-                logging.error(f"❌ Failed to get administrators as fallback: {e2}")
-                return
+            logging.error(f"❌ Failed to get chat administrators: {e}")
+            return
         
         logging.info(f"📋 Found {len(chat_members)} members in group {GROUP_ID}")
         
