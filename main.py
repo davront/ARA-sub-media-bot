@@ -131,6 +131,8 @@ async def auto_check_subscription(bot: Bot, chat_id: int, user_id: int, user_dis
                     
             except Exception as e:
                 logging.warning(f"⚠️ Автопроверка: не удалось проверить статус пользователя {user_id}: {e}")
+                # Добавляем задержку перед следующей попыткой
+                await asyncio.sleep(5)
                 continue
             
             # Check subscription
@@ -254,7 +256,7 @@ async def send_reminder(bot: Bot, chat_id: int, user_id: int, user_display_name:
         logging.error(f"❌ Foydalanuvchi {user_id} uchun eskirmasini yuborib bo'lmadi: {e}")
 
 
-def subscribed_keyboard(target_user_id: int = None) -> InlineKeyboardBuilder:
+def subscribed_keyboard() -> InlineKeyboardBuilder:
     """Create inline keyboard with subscription button and channel link"""
     kb = InlineKeyboardBuilder()
     
@@ -266,13 +268,8 @@ def subscribed_keyboard(target_user_id: int = None) -> InlineKeyboardBuilder:
     else:
         kb.button(text="📺 Obuna bo'lish", url=f"https://t.me/c/{str(CHANNEL_ID)[4:]}/1")
     
-    # Subscription confirmation button
-    if target_user_id:
-        # Include target user ID in callback data
-        kb.button(text="✅ Men obuna bo'ldim", callback_data=f"i_subscribed_{target_user_id}")
-    else:
-        # Fallback for backward compatibility
-        kb.button(text="✅ Men obuna bo'ldim", callback_data="i_subscribed")
+    # Universal subscription confirmation button (без привязки к пользователю)
+    kb.button(text="✅ Men obuna bo'ldim", callback_data="i_subscribed")
     
     kb.adjust(1)  # One button per row
     return kb
@@ -348,13 +345,13 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
             sent_msg = await bot.send_message(
                 chat_id=chat_id,
                 text=text,
-                reply_markup=subscribed_keyboard(user_id).as_markup(),
+                reply_markup=subscribed_keyboard().as_markup(),
                 disable_web_page_preview=True,
             )
         else:
             sent_msg = await message.reply(
                 text,
-                reply_markup=subscribed_keyboard(user_id).as_markup(),
+                reply_markup=subscribed_keyboard().as_markup(),
                 disable_web_page_preview=True,
             )
         
@@ -589,7 +586,7 @@ async def daily_check_all_members(bot: Bot) -> None:
                         )
                         
                         # Create keyboard with user ID
-                        keyboard = subscribed_keyboard(user_id)
+                        keyboard = subscribed_keyboard()
                         
                         # Send message
                         sent_msg = await bot.send_message(
@@ -611,6 +608,9 @@ async def daily_check_all_members(bot: Bot) -> None:
                         logging.error(f"❌ Failed to mute admin {user_id} during daily check: {e}")
                 else:
                     logging.info(f"✅ Admin {user_id} is subscribed, no action needed")
+                
+                # Добавляем задержку между проверками администраторов
+                await asyncio.sleep(0.5)  # Задержка 500мс между каждым администратором
             
             # Убираем отправку общего напоминания в группу - эта информация скрыта от участников
             # if len(unsubscribed_users) > 0:
@@ -767,9 +767,9 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
             logging.warning(f"⚠️ Не удалось отправить сообщение пользователю {user_id} в DM: {e}")
 
 
-@router.callback_query(F.data.startswith("i_subscribed"))
+@router.callback_query(F.data == "i_subscribed")
 async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
-    logging.info(f"🔘 Кнопка 'Подписался' пользователя user_id={callback.from_user.id} chat_id={callback.message.chat.id if callback.message else 'неизвестно'} в группе {GROUP_ID}")
+    logging.info(f"🔘 Универсальная кнопка 'Подписался' нажата пользователем user_id={callback.from_user.id}")
     
     chat = callback.message.chat if callback.message else None
     if chat is None:
@@ -783,115 +783,71 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
         return
 
     user_id = callback.from_user.id
-    logging.info(f"🔍 Обрабатываю нажатие кнопки пользователя user_id={user_id}")
+    logging.info(f"🔍 Обрабатываю нажатие универсальной кнопки пользователем user_id={user_id}")
     
-    # Извлекаем ID упомянутого пользователя из callback_data
-    callback_data = callback.data
-    if callback_data == "i_subscribed":
-        # Fallback для старого формата - пытаемся получить из reply_to_message
-        if callback.message and callback.message.reply_to_message:
-            mention_pattern = r'tg://user\?id=(\d+)'
-            reply_text = callback.message.reply_to_message.text
-            if reply_text:
-                match = re.search(mention_pattern, reply_text)
-                if match:
-                    mentioned_user_id = int(match.group(1))
-                    logging.info(f"📝 Поддержка старого формата: кнопка была для user_id {mentioned_user_id}")
-                else:
-                    logging.warning(f"⚠️ Не удалось найти пользователя по тексту кнопки для user_id {user_id}")
-                    await callback.answer("Ошибка: не удалось определить ID пользователя", show_alert=True)
-                    return
-            else:
-                logging.warning(f"⚠️ reply_to_message.text для user_id {user_id} равен None")
-                await callback.answer("Ошибка: не удалось определить ID пользователя", show_alert=True)
-                return
-        else:
-            logging.warning(f"⚠️ Для старого формата кнопки reply_to_message отсутствует")
-            await callback.answer("Ошибка: не удалось определить ID пользователя", show_alert=True)
-            return
-    else:
-        # Новый формат: i_subscribed_123456
-        try:
-            mentioned_user_id = int(callback_data.split("_")[-1])
-            logging.info(f"📝 Новый формат: кнопка была для user_id {mentioned_user_id}")
-        except (ValueError, IndexError):
-            logging.error(f"❌ Неверный формат callback_data: {callback_data}")
-            await callback.answer("Ошибка: неверный формат кнопки", show_alert=True)
-            return
-    
-    # Проверяем, является ли нажавший пользователь тем, кто был упомянут в кнопке
-    logging.info(f"📝 Кнопка была для user_id {mentioned_user_id}, пользователь {user_id} нажал")
-    if user_id != mentioned_user_id:
-        logging.warning(f"🚫 Неверный пользователь {user_id} нажал кнопку, она была для user_id {mentioned_user_id}")
-        await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
-        return
-    logging.info(f"✅ Верный пользователь {user_id} нажал свою кнопку")
-    
-    # Теперь проверяем подписку упомянутого пользователя (который должен быть размучен)
-    logging.info(f"📋 Проверяю подписку для user_id={mentioned_user_id}")
-    is_sub = await is_user_subscribed(bot, mentioned_user_id)
-    logging.info(f"📊 Статус подписки для user_id={mentioned_user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
+    # Проверяем подписку нажавшего пользователя
+    logging.info(f"📋 Проверяю подписку для user_id={user_id}")
+    is_sub = await is_user_subscribed(bot, user_id)
+    logging.info(f"📊 Статус подписки для user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
         try:
-            # Проверяем, является ли упомянутый пользователь владельцем чата (нельзя ограничить)
-            member = await bot.get_chat_member(chat.id, mentioned_user_id)
+            # Проверяем, является ли пользователь владельцем чата (нельзя ограничить)
+            member = await bot.get_chat_member(chat.id, user_id)
             member_status = getattr(member, "status", "member")
-            logging.info(f"👑 Статус пользователя {mentioned_user_id} в группе: {member_status}")
+            logging.info(f"👑 Статус пользователя {user_id} в группе: {member_status}")
             
             if member_status == "creator":
                 # Владелец чата - просто отправляем приветственное сообщение без размучения
-                logging.info(f"👑 Владелец группы {mentioned_user_id} подтвердил подписку")
+                logging.info(f"👑 Владелец группы {user_id} подтвердил подписку")
                 await callback.answer("Подписка подтверждена")
                 return
             
-            logging.info(f"🔓 Размучиваю пользователя {mentioned_user_id} после подтверждения подписки")
-            await unmute_user(bot, chat.id, mentioned_user_id)
-            logging.info(f"✅ Успешно размутил пользователя {mentioned_user_id}")
-        except Exception as e:
-            logging.error(f"❌ Не удалось размутить пользователя {mentioned_user_id}: {e}")
-        
-        # Reply to the original join message if available
-        try:
-            if callback.message and callback.message.reply_to_message:
-                # Проверяем, существует ли сообщение для ответа
+            # Проверяем, замучен ли пользователь
+            if hasattr(member, 'is_restricted') and member.is_restricted:
+                logging.info(f"🔓 Размучиваю пользователя {user_id} после подтверждения подписки")
+                await unmute_user(bot, chat.id, user_id)
+                logging.info(f"✅ Успешно размутил пользователя {user_id}")
+                
+                # Отправляем приветственное сообщение
+                welcome_text = "🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin."
+                
                 try:
-                    await bot.get_message(chat.id, callback.message.reply_to_message.message_id)
-                except Exception:
-                    logging.warning(f"⚠️ Сообщение {callback.message.reply_to_message.message_id} недоступно для ответа, отправляю без reply")
                     sent = await bot.send_message(
                         chat_id=chat.id,
-                        text="🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin."
+                        text=welcome_text,
+                        reply_to_message_id=callback.message.message_id,
                     )
-                else:
-                    sent = await bot.send_message(
-                        chat_id=chat.id,
-                        text="🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.",
-                        reply_to_message_id=callback.message.reply_to_message.message_id,
-                    )
-                logging.info(f"📝 Отправлено приветственное сообщение пользователю {mentioned_user_id}, message_id={sent.message_id}")
+                    logging.info(f"📝 Отправлено приветственное сообщение пользователю {user_id}, message_id={sent.message_id}")
+                    
+                    # Планируем удаление приветственного сообщения
+                    asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
+                    
+                except Exception as e:
+                    logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {user_id}: {e}")
+                
+                # Удаляем сообщение с кнопкой (которое нажал пользователь)
+                try:
+                    await bot.delete_message(chat_id=chat.id, message_id=callback.message.message_id)
+                    logging.info(f"🗑️ Удалено сообщение с кнопкой {callback.message.message_id} для пользователя {user_id}")
+                except Exception as e:
+                    logging.error(f"❌ Не удалось удалить сообщение с кнопкой: {e}")
+                
+                await callback.answer("Obuna tasdiqlandi! Siz ovozsiz qilindingiz.")
+                logging.info(f"✅ Подписка подтверждена и пользователь {user_id} размучен")
+                
             else:
-                sent = await callback.message.answer("🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin.")
-                logging.info(f"📝 Отправлено приветственное сообщение пользователю {mentioned_user_id}, message_id={sent.message_id}")
+                # Пользователь не замучен
+                logging.info(f"ℹ️ Пользователь {user_id} не замучен, но подписан")
+                await callback.answer("Siz allaqachon ovozsiz emassiz va obuna bo'lgansiz!")
+                
+        except Exception as e:
+            logging.error(f"❌ Не удалось обработать нажатие кнопки для пользователя {user_id}: {e}")
+            await callback.answer("Xatolik yuz berdi, qaytadan urinib ko'ring")
             
-            # Планируем удаление приветственного сообщения
-            logging.info(f"⏰ Удаляю приветственное сообщение {sent.message_id} через 10 секунд")
-            asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
-        except Exception as e:
-            logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {mentioned_user_id}: {e}")
-        
-        # Планируем удаление сообщения с призывом к подписке (с кнопкой)
-        try:
-            logging.info(f"⏰ Удаляю сообщение с кнопкой {callback.message.message_id} через 10 секунд")
-            asyncio.create_task(delete_message_after(bot, chat.id, callback.message.message_id, 10))
-        except Exception as e:
-            logging.error(f"❌ Ошибка при добавлении сообщения к удалению: {e}")
-        
-        await callback.answer("Obuna tasdiqlandi")
-        logging.info(f"✅ Подписка подтверждена для пользователя {mentioned_user_id}")
     else:
-        logging.warning(f"⚠️ Пользователь {mentioned_user_id} не подписан")
-        await callback.answer("Foydalanuvchi hali obuna bo'lmagan", show_alert=False)
+        logging.warning(f"⚠️ Пользователь {user_id} не подписан")
+        await callback.answer("Siz hali kanalga obuna bo'lmagansiz! Avval obuna bo'ling, keyin tugmani bosing.", show_alert=True)
 
 
 @router.message(CommandStart())
