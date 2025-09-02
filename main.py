@@ -109,9 +109,15 @@ async def delete_message_after(bot: Bot, chat_id: int, message_id: int, delay_se
         logging.warning(f"⚠️ Не удалось удалить сообщение {message_id}: {e}")
 
 
-def subscribed_keyboard() -> InlineKeyboardBuilder:
+def subscribed_keyboard(target_user_id: int = None) -> InlineKeyboardBuilder:
+    """Create inline keyboard with subscription button"""
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Obuna bo'ldim", callback_data="i_subscribed")
+    if target_user_id:
+        # Include target user ID in callback data
+        kb.button(text="✅ Obuna bo'ldim", callback_data=f"i_subscribed_{target_user_id}")
+    else:
+        # Fallback for backward compatibility
+        kb.button(text="✅ Obuna bo'ldim", callback_data="i_subscribed")
     kb.adjust(1)
     return kb
 
@@ -173,7 +179,7 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
     try:
         sent_msg = await message.reply(
             text,
-            reply_markup=subscribed_keyboard().as_markup(),
+            reply_markup=subscribed_keyboard(user_id).as_markup(),
             disable_web_page_preview=True,
         )
         logging.info(f"📝 Отправил сообщение с кнопкой подписки пользователю {user_id} ({user_display_name}), message_id={sent_msg.message_id}")
@@ -256,7 +262,7 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
             logging.warning(f"⚠️ Не удалось отправить ЛС пользователю {user_id}: {e}")
 
 
-@router.callback_query(F.data == "i_subscribed")
+@router.callback_query(F.data.startswith("i_subscribed"))
 async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
     logging.info(f"🔘 Кнопка 'Obuna bo'ldim' нажата пользователем user_id={callback.from_user.id} в чате chat_id={callback.message.chat.id if callback.message else 'неизвестно'}")
     
@@ -274,42 +280,52 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
     user_id = callback.from_user.id
     logging.info(f"🔍 Обрабатываю нажатие кнопки от пользователя user_id={user_id}")
     
-    # Check if this user is the one who was mentioned in the original message
-    if callback.message and callback.message.reply_to_message:
-        # Extract user ID from the mention in the original message
-        mention_pattern = r'tg://user\?id=(\d+)'
-        reply_text = callback.message.reply_to_message.text
-        if reply_text:  # Check if text is not None
-            match = re.search(mention_pattern, reply_text)
-            if match:
-                mentioned_user_id = int(match.group(1))
-                logging.info(f"📝 Кнопка была предназначена для user_id={mentioned_user_id}, нажал user_id={user_id}")
-                if user_id != mentioned_user_id:
-                    logging.warning(f"🚫 Неправильный пользователь {user_id} нажал кнопку, предназначенную для {mentioned_user_id}")
-                    await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
+    # Extract target user ID from callback data
+    callback_data = callback.data
+    if callback_data == "i_subscribed":
+        # Fallback for old format - try to get from reply_to_message
+        if callback.message and callback.message.reply_to_message:
+            mention_pattern = r'tg://user\?id=(\d+)'
+            reply_text = callback.message.reply_to_message.text
+            if reply_text:
+                match = re.search(mention_pattern, reply_text)
+                if match:
+                    mentioned_user_id = int(match.group(1))
+                    logging.info(f"📝 Использую старый формат: кнопка была предназначена для user_id={mentioned_user_id}")
+                else:
+                    logging.warning(f"⚠️ Не удалось найти упоминание пользователя в тексте для user_id={user_id}")
+                    await callback.answer("Ошибка: не удалось определить, кому предназначена кнопка", show_alert=True)
                     return
-                logging.info(f"✅ Правильный пользователь {user_id} нажал свою кнопку")
-                
-                # Now check subscription of the mentioned user (who should be unmuted)
-                logging.info(f"📋 Проверяю подписку для упомянутого пользователя user_id={mentioned_user_id}")
-                is_sub = await is_user_subscribed(bot, mentioned_user_id)
-                logging.info(f"📊 Статус подписки для упомянутого пользователя user_id={mentioned_user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
             else:
-                logging.warning(f"⚠️ Не удалось найти упоминание пользователя в тексте для user_id={user_id}")
+                logging.warning(f"⚠️ reply_to_message.text равен None для пользователя {user_id}")
                 await callback.answer("Ошибка: не удалось определить, кому предназначена кнопка", show_alert=True)
                 return
         else:
-            logging.warning(f"⚠️ reply_to_message.text равен None для пользователя {user_id}")
+            logging.warning(f"⚠️ Нет reply_to_message для старого формата кнопки")
             await callback.answer("Ошибка: не удалось определить, кому предназначена кнопка", show_alert=True)
             return
     else:
-        logging.info("ℹ️ Нет reply_to_message, кнопка не может быть обработана")
-        await callback.answer("Ошибка: кнопка не может быть обработана", show_alert=True)
+        # New format: i_subscribed_123456
+        try:
+            mentioned_user_id = int(callback_data.split("_")[-1])
+            logging.info(f"📝 Новый формат: кнопка была предназначена для user_id={mentioned_user_id}")
+        except (ValueError, IndexError):
+            logging.error(f"❌ Неверный формат callback_data: {callback_data}")
+            await callback.answer("Ошибка: неверный формат кнопки", show_alert=True)
+            return
+    
+    # Check if this user is the one who was mentioned in the button
+    logging.info(f"📝 Кнопка была предназначена для user_id={mentioned_user_id}, нажал user_id={user_id}")
+    if user_id != mentioned_user_id:
+        logging.warning(f"🚫 Неправильный пользователь {user_id} нажал кнопку, предназначенную для {mentioned_user_id}")
+        await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
         return
-
-    # Remove the old subscription check since we already checked it above
-    # is_sub = await is_user_subscribed(bot, user_id)
-    # logging.info(f"📊 Статус подписки для нажатия кнопки от user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
+    logging.info(f"✅ Правильный пользователь {user_id} нажал свою кнопку")
+    
+    # Now check subscription of the mentioned user (who should be unmuted)
+    logging.info(f"📋 Проверяю подписку для упомянутого пользователя user_id={mentioned_user_id}")
+    is_sub = await is_user_subscribed(bot, mentioned_user_id)
+    logging.info(f"📊 Статус подписки для упомянутого пользователя user_id={mentioned_user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
         try:
