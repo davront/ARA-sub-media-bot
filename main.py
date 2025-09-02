@@ -454,140 +454,144 @@ async def daily_check_all_members(bot: Bot) -> None:
     try:
         logging.info(f"🔄 Starting daily subscription check for group {GROUP_ID}")
         
-        # Get all chat members
-        chat_members = []
+        # Note: Telegram API doesn't allow bots to get full member list
+        # We'll check administrators and send a general reminder to the group
+        # Users will be checked individually when they become active
+        
         try:
-            # Get chat administrators first to find owner
+            # Get chat administrators
             admins = await bot.get_chat_administrators(GROUP_ID)
-            chat_members.extend(admins)
+            logging.info(f"📋 Found {len(admins)} administrators in group {GROUP_ID}")
             
-            # Note: Telegram API doesn't provide a direct way to get all members
-            # We'll work with administrators for now, and can add more logic later
-            # For now, we'll check only administrators and any new members that join
+            checked_count = 0
+            muted_count = 0
+            already_muted_count = 0
+            unsubscribed_users = []
             
-            logging.info(f"📋 Using administrators as primary members to check: {len(chat_members)} members")
+            for admin in admins:
+                user_id = admin.user.id
                 
+                # Skip bot itself
+                if user_id == bot.id:
+                    continue
+                    
+                # Skip chat owner (creator)
+                if admin.status == "creator":
+                    logging.info(f"👑 Skipping group owner {user_id}")
+                    continue
+                
+                checked_count += 1
+                logging.info(f"🔍 Checking subscription for admin {user_id} ({admin.user.first_name or 'Unknown'})")
+                
+                # Check subscription
+                is_sub = await is_user_subscribed(bot, user_id)
+                
+                if not is_sub:
+                    # Collect user info for report
+                    user_info = {
+                        'id': user_id,
+                        'username': admin.user.username,
+                        'first_name': admin.user.first_name,
+                        'last_name': admin.user.last_name,
+                        'status': admin.status
+                    }
+                    unsubscribed_users.append(user_info)
+                    
+                    # Check if user is already muted
+                    try:
+                        current_member = await bot.get_chat_member(GROUP_ID, user_id)
+                        if hasattr(current_member, 'is_restricted') and current_member.is_restricted:
+                            already_muted_count += 1
+                            logging.info(f"🔇 Admin {user_id} is already muted, skipping")
+                            continue
+                    except Exception as e:
+                        logging.warning(f"⚠️ Could not check current status of admin {user_id}: {e}")
+                    
+                    # Mute admin
+                    try:
+                        await mute_user(bot, GROUP_ID, user_id)
+                        muted_count += 1
+                        
+                        # Get user display name
+                        user_display_name = "Foydalanuvchi"
+                        if admin.user.username:
+                            user_display_name = f"@{admin.user.username}"
+                        elif admin.user.first_name:
+                            user_display_name = admin.user.first_name
+                            if admin.user.last_name:
+                                user_display_name += f" {admin.user.last_name}"
+                        
+                        # Send notification message
+                        notification_text = (
+                            f"🔴 DIQQAT! Sizni ovozsiz qildik!\n\n"
+                            f"👤 {user_display_name}, siz kanalga obuna emassiz!\n\n"
+                            f"📋 QADAMMA-QADAM KO'RSATMALAR:\n\n"
+                            f"1️⃣ Kanalga havola orqali o'ting\n"
+                            f"2️⃣ \"Obuna bo'lish\" / \"Join\" tugmasini bosing\n"
+                            f"3️⃣ Guruhga qayting\n"
+                            f"4️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
+                            f"5️⃣ Tayyor! Endi xabar yozishingiz mumkin\n\n"
+                            f"💡 Obuna bo'lgandan so'ng quyidagi tugmani bosing:"
+                        )
+                        
+                        # Create keyboard with user ID
+                        keyboard = subscribed_keyboard(user_id)
+                        
+                        # Send message
+                        sent_msg = await bot.send_message(
+                            chat_id=GROUP_ID,
+                            text=notification_text,
+                            reply_markup=keyboard.as_markup(),
+                            disable_web_page_preview=True,
+                        )
+                        
+                        logging.info(f"📝 Sent daily check notification to admin {user_id} ({user_display_name}), message_id={sent_msg.message_id}")
+                        
+                        # Schedule reminders and auto-check
+                        asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 120))
+                        asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 300))
+                        asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 600))
+                        asyncio.create_task(auto_check_subscription(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id))
+                        
+                    except Exception as e:
+                        logging.error(f"❌ Failed to mute admin {user_id} during daily check: {e}")
+                else:
+                    logging.info(f"✅ Admin {user_id} is subscribed, no action needed")
+            
+            # Send general reminder to the group about subscription requirement
+            if len(unsubscribed_users) > 0:
+                general_reminder = (
+                    f"📢 KUNLIK ESDA QOLING!\n\n"
+                    f"🔴 Guruhda {len(unsubscribed_users)} ta foydalanuvchi kanalga obuna emas!\n\n"
+                    f"📋 Eslatma:\n"
+                    f"• Kanalga obuna bo'lmagan foydalanuvchilar ovozsiz qilindi\n"
+                    f"• Obuna bo'lish uchun yuqoridagi xabarlardagi tugmalarni bosing\n"
+                    f"• Obuna bo'lgandan so'ng \"✅ Men obuna bo'ldim\" tugmasini bosing\n\n"
+                    f"💡 Barcha foydalanuvchilar kanalga obuna bo'lishi shart!"
+                )
+                
+                try:
+                    sent_reminder = await bot.send_message(
+                        chat_id=GROUP_ID,
+                        text=general_reminder,
+                        disable_web_page_preview=True
+                    )
+                    logging.info(f"📢 Sent general reminder to group, message_id={sent_reminder.message_id}")
+                    
+                    # Auto-delete general reminder after 1 hour
+                    asyncio.create_task(delete_message_after(bot, GROUP_ID, sent_reminder.message_id, 3600))
+                    
+                except Exception as e:
+                    logging.error(f"❌ Failed to send general reminder: {e}")
+            
         except Exception as e:
             logging.error(f"❌ Failed to get chat administrators: {e}")
             return
         
-        logging.info(f"📋 Found {len(chat_members)} members in group {GROUP_ID}")
-        
-        checked_count = 0
-        muted_count = 0
-        already_muted_count = 0
-        unsubscribed_users = []  # Collect info about unsubscribed users
-        
-        for member in chat_members:
-            # Handle both ChatMember and ChatMemberUpdated objects
-            if hasattr(member, 'user'):
-                user = member.user
-                status = member.status
-            elif hasattr(member, 'new_chat_member'):
-                user = member.new_chat_member.user
-                status = member.new_chat_member.status
-            else:
-                logging.warning(f"⚠️ Unknown member object type: {type(member)}")
-                continue
-                
-            user_id = user.id
-            
-            # Skip bot itself
-            if user_id == bot.id:
-                continue
-                
-            # Skip chat owner (creator)
-            if status == "creator":
-                logging.info(f"👑 Skipping group owner {user_id}")
-                continue
-                
-            # Skip admins (optional - you can remove this if you want to check admins too)
-            if status == "administrator":
-                logging.info(f"👑 Skipping admin {user_id}")
-                continue
-            
-            checked_count += 1
-            logging.info(f"🔍 Checking subscription for member {user_id} ({user.first_name or 'Unknown'})")
-            
-            # Check subscription
-            is_sub = await is_user_subscribed(bot, user_id)
-            
-            if not is_sub:
-                # Collect user info for report
-                user_info = {
-                    'id': user_id,
-                    'username': user.username,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'status': status
-                }
-                unsubscribed_users.append(user_info)
-                
-                # Check if user is already muted
-                try:
-                    current_member = await bot.get_chat_member(GROUP_ID, user_id)
-                    if hasattr(current_member, 'is_restricted') and current_member.is_restricted:
-                        already_muted_count += 1
-                        logging.info(f"🔇 User {user_id} is already muted, skipping")
-                        continue
-                except Exception as e:
-                    logging.warning(f"⚠️ Could not check current status of user {user_id}: {e}")
-                
-                # Mute user
-                try:
-                    await mute_user(bot, GROUP_ID, user_id)
-                    muted_count += 1
-                    
-                    # Get user display name
-                    user_display_name = "Foydalanuvchi"
-                    if user.username:
-                        user_display_name = f"@{user.username}"
-                    elif user.first_name:
-                        user_display_name = user.first_name
-                        if user.last_name:
-                            user_display_name += f" {user.last_name}"
-                    
-                    # Send notification message
-                    notification_text = (
-                        f"🔴 DIQQAT! Sizni ovozsiz qildik!\n\n"
-                        f"👤 {user_display_name}, siz kanalga obuna emassiz!\n\n"
-                        f"📋 QADAMMA-QADAM KO'RSATMALAR:\n\n"
-                        f"1️⃣ Kanalga havola orqali o'ting\n"
-                        f"2️⃣ \"Obuna bo'lish\" / \"Join\" tugmasini bosing\n"
-                        f"3️⃣ Guruhga qayting\n"
-                        f"4️⃣ \"✅ Men obuna bo'ldim\" tugmasini bosing\n"
-                        f"5️⃣ Tayyor! Endi xabar yozishingiz mumkin\n\n"
-                        f"💡 Obuna bo'lgandan so'ng quyidagi tugmani bosing:"
-                    )
-                    
-                    # Create keyboard with user ID
-                    keyboard = subscribed_keyboard(user_id)
-                    
-                    # Send message
-                    sent_msg = await bot.send_message(
-                        chat_id=GROUP_ID,
-                        text=notification_text,
-                        reply_markup=keyboard.as_markup(),
-                        disable_web_page_preview=True,
-                    )
-                    
-                    logging.info(f"📝 Sent daily check notification to user {user_id} ({user_display_name}), message_id={sent_msg.message_id}")
-                    
-                    # Schedule reminders and auto-check
-                    asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 120))
-                    asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 300))
-                    asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 600))
-                    asyncio.create_task(auto_check_subscription(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id))
-                    
-                except Exception as e:
-                    logging.error(f"❌ Failed to mute user {user_id} during daily check: {e}")
-            else:
-                logging.info(f"✅ User {user_id} is subscribed, no action needed")
-        
         # Send report to channel owner
         await send_daily_check_report(bot, checked_count, muted_count, already_muted_count, unsubscribed_users)
         
-        logging.info(f"✅ Daily check completed: {checked_count} members checked, {muted_count} newly muted, {already_muted_count} already muted")
+        logging.info(f"✅ Daily check completed: {checked_count} admins checked, {muted_count} newly muted, {already_muted_count} already muted")
         
     except Exception as e:
         logging.error(f"❌ Error during daily member check: {e}")
