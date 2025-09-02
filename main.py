@@ -260,11 +260,11 @@ def subscribed_keyboard(target_user_id: int = None) -> InlineKeyboardBuilder:
     
     # Channel link button
     if CHANNEL_LINK:
-        kb.button(text="📺 Kanaldan o'ting", url=CHANNEL_LINK)
+        kb.button(text="📺 Obuna bo'lish", url=CHANNEL_LINK)
     elif isinstance(CHANNEL_ID, str) and CHANNEL_ID.startswith('@'):
-        kb.button(text="📺 Kanaldan o'ting", url=f"https://t.me/{CHANNEL_ID[1:]}")
+        kb.button(text="📺 Obuna bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")
     else:
-        kb.button(text="📺 Kanaldan o'ting", url=f"https://t.me/c/{str(CHANNEL_ID)[4:]}/1")
+        kb.button(text="📺 Obuna bo'lish", url=f"https://t.me/c/{str(CHANNEL_ID)[4:]}/1")
     
     # Subscription confirmation button
     if target_user_id:
