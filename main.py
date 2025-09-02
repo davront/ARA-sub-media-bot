@@ -456,8 +456,25 @@ async def daily_check_all_members(bot: Bot) -> None:
         
         # Get all chat members
         chat_members = []
-        async for member in bot.get_chat_members(GROUP_ID):
-            chat_members.append(member)
+        try:
+            # Get chat administrators first to find owner
+            admins = await bot.get_chat_administrators(GROUP_ID)
+            
+            # Get regular members (this will get up to 200 members)
+            # Note: Telegram API limits to 200 members per request
+            async for member in bot.get_chat_members(GROUP_ID, limit=200):
+                chat_members.append(member)
+                
+        except Exception as e:
+            logging.error(f"❌ Failed to get chat members: {e}")
+            # Fallback: try to get administrators only
+            try:
+                admins = await bot.get_chat_administrators(GROUP_ID)
+                chat_members = admins
+                logging.info(f"⚠️ Using administrators only as fallback: {len(chat_members)} members")
+            except Exception as e2:
+                logging.error(f"❌ Failed to get administrators as fallback: {e2}")
+                return
         
         logging.info(f"📋 Found {len(chat_members)} members in group {GROUP_ID}")
         
@@ -467,24 +484,35 @@ async def daily_check_all_members(bot: Bot) -> None:
         unsubscribed_users = []  # Collect info about unsubscribed users
         
         for member in chat_members:
-            user_id = member.user.id
+            # Handle both ChatMember and ChatMemberUpdated objects
+            if hasattr(member, 'user'):
+                user = member.user
+                status = member.status
+            elif hasattr(member, 'new_chat_member'):
+                user = member.new_chat_member.user
+                status = member.new_chat_member.status
+            else:
+                logging.warning(f"⚠️ Unknown member object type: {type(member)}")
+                continue
+                
+            user_id = user.id
             
             # Skip bot itself
             if user_id == bot.id:
                 continue
                 
             # Skip chat owner (creator)
-            if member.status == "creator":
+            if status == "creator":
                 logging.info(f"👑 Skipping group owner {user_id}")
                 continue
                 
             # Skip admins (optional - you can remove this if you want to check admins too)
-            if member.status == "administrator":
+            if status == "administrator":
                 logging.info(f"👑 Skipping admin {user_id}")
                 continue
             
             checked_count += 1
-            logging.info(f"🔍 Checking subscription for member {user_id} ({member.user.first_name or 'Unknown'})")
+            logging.info(f"🔍 Checking subscription for member {user_id} ({user.first_name or 'Unknown'})")
             
             # Check subscription
             is_sub = await is_user_subscribed(bot, user_id)
@@ -493,18 +521,22 @@ async def daily_check_all_members(bot: Bot) -> None:
                 # Collect user info for report
                 user_info = {
                     'id': user_id,
-                    'username': member.user.username,
-                    'first_name': member.user.first_name,
-                    'last_name': member.user.last_name,
-                    'status': member.status
+                    'username': user.username,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'status': status
                 }
                 unsubscribed_users.append(user_info)
                 
                 # Check if user is already muted
-                if hasattr(member, 'is_restricted') and member.is_restricted:
-                    already_muted_count += 1
-                    logging.info(f"🔇 User {user_id} is already muted, skipping")
-                    continue
+                try:
+                    current_member = await bot.get_chat_member(GROUP_ID, user_id)
+                    if hasattr(current_member, 'is_restricted') and current_member.is_restricted:
+                        already_muted_count += 1
+                        logging.info(f"🔇 User {user_id} is already muted, skipping")
+                        continue
+                except Exception as e:
+                    logging.warning(f"⚠️ Could not check current status of user {user_id}: {e}")
                 
                 # Mute user
                 try:
@@ -513,12 +545,12 @@ async def daily_check_all_members(bot: Bot) -> None:
                     
                     # Get user display name
                     user_display_name = "Foydalanuvchi"
-                    if member.user.username:
-                        user_display_name = f"@{member.user.username}"
-                    elif member.user.first_name:
-                        user_display_name = member.user.first_name
-                        if member.user.last_name:
-                            user_display_name += f" {member.user.last_name}"
+                    if user.username:
+                        user_display_name = f"@{user.username}"
+                    elif user.first_name:
+                        user_display_name = user.first_name
+                        if user.last_name:
+                            user_display_name += f" {user.last_name}"
                     
                     # Send notification message
                     notification_text = (
