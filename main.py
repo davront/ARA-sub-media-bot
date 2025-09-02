@@ -253,15 +253,19 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
     if callback.message and callback.message.reply_to_message:
         # Extract user ID from the mention in the original message
         mention_pattern = r'tg://user\?id=(\d+)'
-        match = re.search(mention_pattern, callback.message.reply_to_message.text)
-        if match:
-            mentioned_user_id = int(match.group(1))
-            logging.info(f"📝 Button was meant for user_id={mentioned_user_id}, clicked by user_id={user_id}")
-            if user_id != mentioned_user_id:
-                logging.warning(f"🚫 Wrong user {user_id} clicked button meant for {mentioned_user_id}")
-                await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
-                return
-            logging.info(f"✅ Correct user {user_id} clicked their button")
+        reply_text = callback.message.reply_to_message.text
+        if reply_text:  # Check if text is not None
+            match = re.search(mention_pattern, reply_text)
+            if match:
+                mentioned_user_id = int(match.group(1))
+                logging.info(f"📝 Button was meant for user_id={mentioned_user_id}, clicked by user_id={user_id}")
+                if user_id != mentioned_user_id:
+                    logging.warning(f"🚫 Wrong user {user_id} clicked button meant for {mentioned_user_id}")
+                    await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
+                    return
+                logging.info(f"✅ Correct user {user_id} clicked their button")
+        else:
+            logging.warning(f"⚠️ reply_to_message.text is None for user {user_id}")
     else:
         logging.info("ℹ️ No reply_to_message, proceeding with subscription check")
 
