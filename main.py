@@ -116,7 +116,7 @@ def subscribed_keyboard() -> InlineKeyboardBuilder:
     return kb
 
 
-async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Message) -> None:
+async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Message, user_info: dict = None) -> None:
     """Common logic for handling new members"""
     logging.info(f"🔍 Обнаружен новый участник: user_id={user_id} в чате chat_id={chat_id}")
     
@@ -155,9 +155,19 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
     except Exception as e:
         logging.error(f"❌ Не удалось замьютить пользователя {user_id}: {e}")
 
+    # Get user display name
+    user_display_name = "Foydalanuvchi"  # fallback
+    if user_info:
+        if user_info.get('username'):
+            user_display_name = f"@{user_info['username']}"
+        elif user_info.get('first_name'):
+            user_display_name = user_info['first_name']
+            if user_info.get('last_name'):
+                user_display_name += f" {user_info['last_name']}"
+    
     channel_hint = CHANNEL_LINK or (str(CHANNEL_ID) if isinstance(CHANNEL_ID, str) else "kanal")
     text = (
-        f"<a href=\"tg://user?id={user_id}\">Foydalanuvchi</a>, bu guruhda xabar yuborish uchun avval kanalga obuna bo'ling.\n"
+        f"<a href=\"tg://user?id={user_id}\">{user_display_name}</a>, bu guruhda xabar yuborish uchun avval kanalga obuna bo'ling.\n"
         f"Havola: {channel_hint}\nObuna bo'lgach, quyidagi tugmani bosing."
     )
     try:
@@ -166,7 +176,7 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
             reply_markup=subscribed_keyboard().as_markup(),
             disable_web_page_preview=True,
         )
-        logging.info(f"📝 Отправил сообщение с кнопкой подписки пользователю {user_id}, message_id={sent_msg.message_id}")
+        logging.info(f"📝 Отправил сообщение с кнопкой подписки пользователю {user_id} ({user_display_name}), message_id={sent_msg.message_id}")
     except Exception as e:
         logging.error(f"❌ Не удалось отправить сообщение с кнопкой пользователю {user_id}: {e}")
 
@@ -187,7 +197,12 @@ async def on_new_chat_members(message: Message, bot: Bot) -> None:
     logging.info(f"📋 Обрабатываю {len(message.new_chat_members)} новых участников")
     for user in message.new_chat_members:
         logging.info(f"👤 Обрабатываю нового участника: {user.first_name} (@{user.username}) user_id={user.id}")
-        await handle_new_member(bot, message.chat.id, user.id, message)
+        user_info = {
+            'username': user.username,
+            'first_name': user.first_name,
+            'last_name': user.last_name
+        }
+        await handle_new_member(bot, message.chat.id, user.id, message, user_info)
 
 
 @router.chat_join_request()
@@ -214,15 +229,25 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
         await bot.decline_chat_join_request(chat_id=event.chat.id, user_id=user_id)
         
         # Try to notify user in DM
+        user_display_name = "Foydalanuvchi"  # fallback
+        if event.from_user.username:
+            user_display_name = f"@{event.from_user.username}"
+        elif event.from_user.first_name:
+            user_display_name = event.from_user.first_name
+            if event.from_user.last_name:
+                user_display_name += f" {event.from_user.last_name}"
+        
         if CHANNEL_LINK:
             text = (
-                "Чтобы попасть в группу, сначала подпишитесь на канал: "
-                f"{CHANNEL_LINK}\nПосле подписки вернитесь и снова отправьте заявку."
+                f"Assalomu alaykum, {user_display_name}! "
+                f"Guruhga kirish uchun avval kanalga obuna bo'ling: "
+                f"{CHANNEL_LINK}\nObuna bo'lgach, qaytadan so'rov yuboring."
             )
         else:
             text = (
-                "Чтобы попасть в группу, сначала подпишитесь на обязательный канал. "
-                "После подписки вернитесь и снова отправьте заявку."
+                f"Assalomu alaykum, {user_display_name}! "
+                f"Guruhga kirish uchun avval majburiy kanalga obuna bo'ling. "
+                f"Obuna bo'lgach, qaytadan so'rov yuboring."
             )
         try:
             await bot.send_message(user_id, text)
