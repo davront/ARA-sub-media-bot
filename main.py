@@ -264,33 +264,46 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
                     await callback.answer("Bu tugma siz uchun emas!", show_alert=True)
                     return
                 logging.info(f"✅ Правильный пользователь {user_id} нажал свою кнопку")
+                
+                # Now check subscription of the mentioned user (who should be unmuted)
+                logging.info(f"📋 Проверяю подписку для упомянутого пользователя user_id={mentioned_user_id}")
+                is_sub = await is_user_subscribed(bot, mentioned_user_id)
+                logging.info(f"📊 Статус подписки для упомянутого пользователя user_id={mentioned_user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
+            else:
+                logging.warning(f"⚠️ Не удалось найти упоминание пользователя в тексте для user_id={user_id}")
+                await callback.answer("Ошибка: не удалось определить, кому предназначена кнопка", show_alert=True)
+                return
         else:
             logging.warning(f"⚠️ reply_to_message.text равен None для пользователя {user_id}")
+            await callback.answer("Ошибка: не удалось определить, кому предназначена кнопка", show_alert=True)
+            return
     else:
-        logging.info("ℹ️ Нет reply_to_message, продолжаю проверку подписки")
+        logging.info("ℹ️ Нет reply_to_message, кнопка не может быть обработана")
+        await callback.answer("Ошибка: кнопка не может быть обработана", show_alert=True)
+        return
 
-    logging.info(f"📋 Проверяю подписку для нажатия кнопки от пользователя user_id={user_id}")
-    is_sub = await is_user_subscribed(bot, user_id)
-    logging.info(f"📊 Статус подписки для нажатия кнопки от user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
+    # Remove the old subscription check since we already checked it above
+    # is_sub = await is_user_subscribed(bot, user_id)
+    # logging.info(f"📊 Статус подписки для нажатия кнопки от user_id={user_id}: {'✅ ПОДПИСАН' if is_sub else '❌ НЕ ПОДПИСАН'}")
     
     if is_sub:
         try:
-            # Check if user is chat owner (can't be restricted)
-            member = await bot.get_chat_member(chat.id, user_id)
+            # Check if mentioned user is chat owner (can't be restricted)
+            member = await bot.get_chat_member(chat.id, mentioned_user_id)
             member_status = getattr(member, "status", "member")
-            logging.info(f"👑 Статус пользователя {user_id} в группе: {member_status}")
+            logging.info(f"👑 Статус упомянутого пользователя {mentioned_user_id} в группе: {member_status}")
             
             if member_status == "creator":
                 # Chat owner - just send welcome message without unmuting
-                logging.info(f"👑 Владелец группы {user_id} подтвердил подписку")
+                logging.info(f"👑 Владелец группы {mentioned_user_id} подтвердил подписку")
                 await callback.answer("Obuna tasdiqlandi")
                 return
             
-            logging.info(f"🔓 Размучиваю пользователя {user_id} после подтверждения подписки")
-            await unmute_user(bot, chat.id, user_id)
-            logging.info(f"✅ Успешно размутил пользователя {user_id}")
+            logging.info(f"🔓 Размучиваю упомянутого пользователя {mentioned_user_id} после подтверждения подписки")
+            await unmute_user(bot, chat.id, mentioned_user_id)
+            logging.info(f"✅ Успешно размутил упомянутого пользователя {mentioned_user_id}")
         except Exception as e:
-            logging.error(f"❌ Не удалось размутить пользователя {user_id}: {e}")
+            logging.error(f"❌ Не удалось размутить упомянутого пользователя {mentioned_user_id}: {e}")
         
         # Reply to the original join message if available
         try:
@@ -300,16 +313,16 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
                     text="Kirish ochildi. Xush kelibsiz!",
                     reply_to_message_id=callback.message.reply_to_message.message_id,
                 )
-                logging.info(f"📝 Отправил приветственное сообщение в ответ пользователю {user_id}, message_id={sent.message_id}")
+                logging.info(f"📝 Отправил приветственное сообщение в ответ упомянутому пользователю {mentioned_user_id}, message_id={sent.message_id}")
             else:
                 sent = await callback.message.answer("Kirish ochildi. Xush kelibsiz!")
-                logging.info(f"📝 Отправил приветственное сообщение пользователю {user_id}, message_id={sent.message_id}")
+                logging.info(f"📝 Отправил приветственное сообщение упомянутому пользователю {mentioned_user_id}, message_id={sent.message_id}")
             
             # Schedule deletion of the greeting too
             logging.info(f"⏰ Планирую удаление приветственного сообщения {sent.message_id} через 10 секунд")
             asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
         except Exception as e:
-            logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {user_id}: {e}")
+            logging.error(f"❌ Не удалось отправить приветственное сообщение упомянутому пользователю {mentioned_user_id}: {e}")
         
         # Schedule deletion of the subscribe prompt message (with the button)
         try:
@@ -319,10 +332,10 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
             logging.error(f"❌ Не удалось запланировать удаление сообщения с кнопкой: {e}")
         
         await callback.answer("Obuna tasdiqlandi")
-        logging.info(f"✅ Подписка подтверждена для пользователя {user_id}")
+        logging.info(f"✅ Подписка подтверждена для упомянутого пользователя {mentioned_user_id}")
     else:
-        logging.warning(f"⚠️ Пользователь {user_id} нажал кнопку, но не подписан")
-        await callback.answer("Siz hali obuna bo'lmaggansiz", show_alert=False)
+        logging.warning(f"⚠️ Упомянутый пользователь {mentioned_user_id} не подписан")
+        await callback.answer("Пользователь ещё не подписался", show_alert=False)
 
 
 @router.message(CommandStart())
