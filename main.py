@@ -26,6 +26,11 @@ CHANNEL_ID_RAW: Optional[str] = os.getenv("CHANNEL_ID")  # e.g. -1001234567890 o
 GROUP_ID_RAW: Optional[str] = os.getenv("GROUP_ID")  # e.g. -1001234567890
 CHANNEL_LINK: Optional[str] = os.getenv("CHANNEL_LINK")  # e.g. https://t.me/my_channel
 
+# Flood control settings
+MESSAGE_DELAY = 0.5  # Delay between messages in seconds
+MAX_RETRIES = 3  # Maximum retry attempts for failed messages
+RETRY_DELAY = 5  # Delay before retry in seconds
+
 
 def parse_chat_id(id_raw: Optional[str]) -> Optional[int | str]:
     if not id_raw:
@@ -52,6 +57,90 @@ if not CHANNEL_ID:
 
 
 router = Router()
+
+
+async def safe_send_message(bot: Bot, chat_id: int, text: str, **kwargs) -> Optional[Message]:
+    """
+    Safely send message with flood control and retry logic
+    """
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Add delay between messages to avoid flood control
+            if attempt > 0:
+                await asyncio.sleep(MESSAGE_DELAY)
+            
+            message = await bot.send_message(chat_id=chat_id, text=text, **kwargs)
+            logging.info(f"✅ Сообщение успешно отправлено в чат {chat_id}, attempt {attempt + 1}")
+            return message
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "flood control" in error_msg or "too many requests" in error_msg:
+                # Extract retry time if available
+                retry_after = RETRY_DELAY
+                if "retry after" in error_msg:
+                    try:
+                        retry_match = re.search(r'retry after (\d+)', error_msg)
+                        if retry_match:
+                            retry_after = int(retry_match.group(1)) + 1
+                    except:
+                        pass
+                
+                logging.warning(f"⚠️ Flood control для чата {chat_id}, attempt {attempt + 1}/{MAX_RETRIES}, ждем {retry_after} секунд")
+                await asyncio.sleep(retry_after)
+                
+                if attempt == MAX_RETRIES - 1:
+                    logging.error(f"❌ Не удалось отправить сообщение в чат {chat_id} после {MAX_RETRIES} попыток")
+                    return None
+            else:
+                logging.error(f"❌ Ошибка отправки сообщения в чат {chat_id}: {e}")
+                if attempt == MAX_RETRIES - 1:
+                    return None
+                await asyncio.sleep(RETRY_DELAY)
+    
+    return None
+
+
+async def safe_reply_message(message: Message, text: str, **kwargs) -> Optional[Message]:
+    """
+    Safely reply to message with flood control and retry logic
+    """
+    for attempt in range(MAX_RETRIES):
+        try:
+            # Add delay between messages to avoid flood control
+            if attempt > 0:
+                await asyncio.sleep(MESSAGE_DELAY)
+            
+            reply_message = await message.reply(text=text, **kwargs)
+            logging.info(f"✅ Ответ успешно отправлен на сообщение {message.message_id}, attempt {attempt + 1}")
+            return reply_message
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "flood control" in error_msg or "too many requests" in error_msg:
+                # Extract retry time if available
+                retry_after = RETRY_DELAY
+                if "retry after" in error_msg:
+                    try:
+                        retry_match = re.search(r'retry after (\d+)', error_msg)
+                        if retry_match:
+                            retry_after = int(retry_match.group(1)) + 1
+                    except:
+                        pass
+                
+                logging.warning(f"⚠️ Flood control при ответе на сообщение {message.message_id}, attempt {attempt + 1}/{MAX_RETRIES}, ждем {retry_after} секунд")
+                await asyncio.sleep(retry_after)
+                
+                if attempt == MAX_RETRIES - 1:
+                    logging.error(f"❌ Не удалось ответить на сообщение {message.message_id} после {MAX_RETRIES} попыток")
+                    return None
+            else:
+                logging.error(f"❌ Ошибка ответа на сообщение {message.message_id}: {e}")
+                if attempt == MAX_RETRIES - 1:
+                    return None
+                await asyncio.sleep(RETRY_DELAY)
+    
+    return None
 
 
 async def is_user_subscribed(bot: Bot, user_id: int) -> bool:
@@ -110,150 +199,13 @@ async def delete_message_after(bot: Bot, chat_id: int, message_id: int, delay_se
         logging.warning(f"⚠️ Не удалось удалить сообщение {message_id}: {e}")
 
 
-async def auto_check_subscription(bot: Bot, chat_id: int, user_id: int, user_display_name: str, message_id: int) -> None:
-    """Automatically check subscription every 30 seconds and unmute if subscribed"""
-    try:
-        # Check every 30 seconds for up to 5 minutes (10 checks)
-        for check_num in range(10):
-            await asyncio.sleep(30)
-            
-            # Check if user is still in group and muted
-            try:
-                member = await bot.get_chat_member(chat_id, user_id)
-                if not member.is_member or member.status in ["left", "kicked"]:
-                    logging.info(f"🔄 Автопроверка: пользователь {user_id} покинул группу, прекращаю проверки")
-                    return
-                    
-                # Check if user is still restricted (muted)
-                if hasattr(member, 'is_restricted') and not member.is_restricted:
-                    logging.info(f"🔄 Автопроверка: пользователь {user_id} уже размучен, прекращаю проверки")
-                    return
-                    
-            except Exception as e:
-                logging.warning(f"⚠️ Автопроверка: не удалось проверить статус пользователя {user_id}: {e}")
-                # Добавляем задержку перед следующей попыткой
-                await asyncio.sleep(5)
-                continue
-            
-            # Check subscription
-            logging.info(f"🔄 Автопроверка #{check_num + 1}: проверяю подписку пользователя {user_id}")
-            is_sub = await is_user_subscribed(bot, user_id)
-            
-            if is_sub:
-                logging.info(f"✅ Автопроверка: пользователь {user_id} подписался, размучиваю")
-                
-                try:
-                    # Unmute user
-                    await unmute_user(bot, chat_id, user_id)
-                    logging.info(f"✅ Автопроверка: успешно размутил пользователя {user_id}")
-                    
-                    # Send welcome message
-                    welcome_text = f"🎉 Avtomatik ravishda obuna topildi!\n\n👤 {user_display_name}, guruhga xush kelibsiz!\n✅ Endi xabar yozishingiz mumkin."
-                    
-                    # Проверяем, существует ли сообщение для ответа
-                    try:
-                        await bot.get_message(chat_id, message_id)
-                    except Exception:
-                        logging.warning(f"⚠️ Сообщение {message_id} недоступно для ответа, отправляю без reply")
-                        sent_welcome = await bot.send_message(
-                            chat_id=chat_id,
-                            text=welcome_text
-                        )
-                    else:
-                        sent_welcome = await bot.send_message(
-                            chat_id=chat_id,
-                            text=welcome_text,
-                            reply_to_message_id=message_id
-                        )
-                    
-                    logging.info(f"📝 Автопроверка: отправил приветствие пользователю {user_id}, message_id={sent_welcome.message_id}")
-                    
-                    # Auto-delete welcome message after 10 seconds
-                    asyncio.create_task(delete_message_after(bot, chat_id, sent_welcome.message_id, 10))
-                    
-                    # Auto-delete original subscription message after 10 seconds
-                    asyncio.create_task(delete_message_after(bot, chat_id, message_id, 10))
-                    
-                except Exception as e:
-                    logging.error(f"❌ Автопроверка: не удалось размутить пользователя {user_id}: {e}")
-                
-                return
-            else:
-                logging.info(f"❌ Автопроверка #{check_num + 1}: пользователь {user_id} еще не подписался")
-        
-        logging.info(f"⏰ Автопроверка: завершена для пользователя {user_id} (5 минут истекли)")
-        
-    except Exception as e:
-        logging.error(f"❌ Ошибка в автопроверке подписки для пользователя {user_id}: {e}")
 
 
-async def send_delayed_reminder(bot: Bot, chat_id: int, user_id: int, user_display_name: str, message_id: int, delay_seconds: int) -> None:
-    """Send reminder after specified delay"""
-    try:
-        await asyncio.sleep(delay_seconds)
-        
-        # Check if user is still muted before sending reminder
-        try:
-            member = await bot.get_chat_member(chat_id, user_id)
-            if not member.is_member or member.status in ["left", "kicked"]:
-                logging.info(f"⏰ Пользователь {user_id} покинул группу, пропускаю напоминание")
-                return
-                
-            # Check if user is still restricted (muted)
-            if hasattr(member, 'is_restricted') and not member.is_restricted:
-                logging.info(f"⏰ Пользователь {user_id} уже размучен, пропускаю напоминание")
-                return
-                
-        except Exception as e:
-            logging.warning(f"⚠️ Не удалось проверить статус пользователя {user_id} для напоминания: {e}")
-            return
-        
-        await send_reminder(bot, chat_id, user_id, user_display_name, message_id)
-        
-    except Exception as e:
-        logging.error(f"❌ Ошибка в планировщике напоминаний для пользователя {user_id}: {e}")
 
 
-async def send_reminder(bot: Bot, chat_id: int, user_id: int, user_display_name: str, message_id: int) -> None:
-    """Send reminder message to muted user"""
-    try:
-        reminder_text = (
-            f"⏰ ESDA QOLING!\n\n"
-            f"👤 {user_display_name}, siz hali ham ovozsiz!\n\n"
-            f"📺 Kanalga obuna bo'lishni va \"✅ Men obuna bo'ldim\" tugmasini bosishni unutmang\n\n"
-            f"🔗 Tugma yuqoridagi xabarda ⬆️"
-        )
-        
-        # Проверяем, существует ли сообщение для ответа
-        try:
-            await bot.get_chat(chat_id)
-        except Exception:
-            logging.warning(f"⚠️ Чат {chat_id} недоступен, пропускаю напоминание")
-            return
-        
-        # Проверяем, существует ли сообщение для ответа
-        try:
-            await bot.get_message(chat_id, message_id)
-        except Exception:
-            logging.warning(f"⚠️ Сообщение {message_id} недоступно для ответа, отправляю без reply")
-            sent_reminder = await bot.send_message(
-                chat_id=chat_id,
-                text=reminder_text
-            )
-        else:
-            sent_reminder = await bot.send_message(
-                chat_id=chat_id,
-                text=reminder_text,
-                reply_to_message_id=message_id
-            )
-        
-        logging.info(f"⏰ Foydalanuvchi {user_id} uchun eskirmasini yubording, message_id={sent_reminder.message_id}")
-        
-        # Auto-delete reminder after 30 seconds
-        asyncio.create_task(delete_message_after(bot, chat_id, sent_reminder.message_id, 30))
-        
-    except Exception as e:
-        logging.error(f"❌ Foydalanuvchi {user_id} uchun eskirmasini yuborib bo'lmadi: {e}")
+
+
+
 
 
 def subscribed_keyboard() -> InlineKeyboardBuilder:
@@ -342,35 +294,33 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
             await bot.get_message(chat_id, message.message_id)
         except Exception:
             logging.warning(f"⚠️ Сообщение {message.message_id} недоступно для ответа, отправляю без reply")
-            sent_msg = await bot.send_message(
-                chat_id=chat_id,
-                text=text,
+            sent_msg = await safe_send_message(
+                bot, chat_id, text,
                 reply_markup=subscribed_keyboard().as_markup(),
                 disable_web_page_preview=True,
             )
         else:
-            sent_msg = await message.reply(
-                text,
-                reply_markup=subscribed_keyboard().as_markup(),
-                disable_web_page_preview=True,
-            )
+            # Try to reply first, fallback to new message if reply fails
+            try:
+                sent_msg = await message.reply(
+                    text,
+                    reply_markup=subscribed_keyboard().as_markup(),
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                logging.warning(f"⚠️ Не удалось ответить на сообщение {message.message_id}, отправляю новое")
+                sent_msg = await safe_send_message(
+                    bot, chat_id, text,
+                    reply_markup=subscribed_keyboard().as_markup(),
+                    disable_web_page_preview=True,
+                )
         
-        logging.info(f"📝 Foydalanuvchi {user_id} uchun obuna tugmasi bilan xabarni yubording, message_id={sent_msg.message_id}")
-        
-        # Schedule reminders
-        logging.info(f"⏰ Foydalanuvchi {user_id} uchun eskirmalarini jadvalga qo'shaman ({user_display_name})")
-        
-        # First reminder after 2 minutes
-        asyncio.create_task(send_delayed_reminder(bot, chat_id, user_id, user_display_name, sent_msg.message_id, 120))
-        
-        # Second reminder after 5 minutes
-        asyncio.create_task(send_delayed_reminder(bot, chat_id, user_id, user_display_name, sent_msg.message_id, 300))
-        
-        # Third reminder after 10 minutes
-        asyncio.create_task(send_delayed_reminder(bot, chat_id, user_id, user_display_name, sent_msg.message_id, 600))
-        
-        # Start automatic subscription checking every 30 seconds
-        asyncio.create_task(auto_check_subscription(bot, chat_id, user_id, user_display_name, sent_msg.message_id))
+        if sent_msg:
+            logging.info(f"📝 Foydalanuvchi {user_id} uchun obuna tugmasi bilan xabarni yubording, message_id={sent_msg.message_id}")
+            
+                    # Автопроверки и напоминания отключены по требованию
+        else:
+            logging.error(f"❌ Foydalanuvchi {user_id} uchun xabarni obuna tugmasi bilan yuborib bo'lmadi")
         
     except Exception as e:
         logging.error(f"❌ Foydalanuvchi {user_id} uchun xabarni obuna tugmasi bilan yuborib bo'lmadi: {e}")
@@ -465,9 +415,8 @@ async def send_daily_check_report(bot: Bot, checked_count: int, muted_count: int
                 logging.warning(f"⚠️ Чат {owner_id} недоступен, пропускаю отправку отчета")
                 return
             
-            await bot.send_message(
-                chat_id=owner_id,
-                text=report_text,
+            await safe_send_message(
+                bot, owner_id, report_text,
                 parse_mode="HTML"
             )
             logging.info(f"📊 Daily check report sent to channel owner {owner_id}")
@@ -483,9 +432,8 @@ async def send_daily_check_report(bot: Bot, checked_count: int, muted_count: int
                     logging.warning(f"⚠️ Канал {CHANNEL_ID} недоступен, пропускаю отправку отчета")
                     return
                 
-                await bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=report_text,
+                await safe_send_message(
+                    bot, CHANNEL_ID, report_text,
                     parse_mode="HTML"
                 )
                 logging.info(f"📊 Daily check report sent to channel {CHANNEL_ID} instead of owner")
@@ -588,21 +536,16 @@ async def daily_check_all_members(bot: Bot) -> None:
                         # Create keyboard with user ID
                         keyboard = subscribed_keyboard()
                         
-                        # Send message
-                        sent_msg = await bot.send_message(
-                            chat_id=GROUP_ID,
-                            text=notification_text,
+                        # Send message using safe function
+                        sent_msg = await safe_send_message(
+                            bot, GROUP_ID, notification_text,
                             reply_markup=keyboard.as_markup(),
                             disable_web_page_preview=True,
                         )
                         
                         logging.info(f"📝 Sent daily check notification to admin {user_id} ({user_display_name}), message_id={sent_msg.message_id}")
                         
-                        # Schedule reminders and auto-check
-                        asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 120))
-                        asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 300))
-                        asyncio.create_task(send_delayed_reminder(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id, 600))
-                        asyncio.create_task(auto_check_subscription(bot, GROUP_ID, user_id, user_display_name, sent_msg.message_id))
+                        # Автопроверки и напоминания отключены по требованию
                         
                     except Exception as e:
                         logging.error(f"❌ Failed to mute admin {user_id} during daily check: {e}")
@@ -610,7 +553,7 @@ async def daily_check_all_members(bot: Bot) -> None:
                     logging.info(f"✅ Admin {user_id} is subscribed, no action needed")
                 
                 # Добавляем задержку между проверками администраторов
-                await asyncio.sleep(0.5)  # Задержка 500мс между каждым администратором
+                await asyncio.sleep(1.0)  # Задержка 1 секунда между каждым администратором
             
             # Убираем отправку общего напоминания в группу - эта информация скрыта от участников
             # if len(unsubscribed_users) > 0:
@@ -761,7 +704,7 @@ async def on_chat_join_request(event: ChatJoinRequest, bot: Bot) -> None:
                 logging.warning(f"⚠️ Пользователь {user_id} недоступен для DM, пропускаю отправку")
                 return
             
-            await bot.send_message(user_id, text)
+            await safe_send_message(bot, user_id, text)
             logging.info(f"📱 Уведомление пользователю {user_id} отправлено в DM")
         except Exception as e:
             logging.warning(f"⚠️ Не удалось отправить сообщение пользователю {user_id} в DM: {e}")
@@ -813,15 +756,24 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
                 welcome_text = "🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin."
                 
                 try:
-                    sent = await bot.send_message(
-                        chat_id=chat.id,
-                        text=welcome_text,
-                        reply_to_message_id=callback.message.message_id,
-                    )
-                    logging.info(f"📝 Отправлено приветственное сообщение пользователю {user_id}, message_id={sent.message_id}")
+                    # Try to reply first, fallback to new message if reply fails
+                    try:
+                        sent = await bot.send_message(
+                            chat_id=chat.id,
+                            text=welcome_text,
+                            reply_to_message_id=callback.message.message_id,
+                        )
+                    except Exception:
+                        logging.warning(f"⚠️ Не удалось ответить на сообщение {callback.message.message_id}, отправляю новое")
+                        sent = await safe_send_message(bot, chat.id, welcome_text)
                     
-                    # Планируем удаление приветственного сообщения
-                    asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
+                    if sent:
+                        logging.info(f"📝 Отправлено приветственное сообщение пользователю {user_id}, message_id={sent.message_id}")
+                        
+                        # Планируем удаление приветственного сообщения
+                        asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
+                    else:
+                        logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {user_id}")
                     
                 except Exception as e:
                     logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {user_id}: {e}")
@@ -889,7 +841,7 @@ async def on_start(message: Message, bot: Bot) -> None:
         logging.warning(f"⚠️ Пользователь {message.from_user.id} недоступен для отправки приветствия")
         return
     
-    await message.answer(text)
+    await safe_reply_message(message, text)
     logging.info(f"📝 Отправлено приветственное сообщение пользователю {message.from_user.id}")
 
 
@@ -946,7 +898,7 @@ async def on_check(message: Message, bot: Bot) -> None:
         logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки результата")
         return
     
-    await message.answer(text)
+    await safe_reply_message(message, text)
     logging.info(f"📝 Отправлен статус подписки для пользователя {user_id}")
 
 
@@ -969,7 +921,7 @@ async def on_force_check(message: Message, bot: Bot) -> None:
         await message.answer("❌ GROUP_ID sozlanmagan, majburiy tekshirish amalga oshirilmaydi")
         return
     
-    await message.answer("🔄 Barcha guruh a'zolarini majburiy tekshirishni boshlayman... Bu biroz vaqt olishi mumkin.")
+    await safe_reply_message(message, "🔄 Barcha guruh a'zolarini majburiy tekshirishni boshlayman... Bu biroz vaqt olishi mumkin.")
     
     try:
         # Запускаем функцию ежедневной проверки
@@ -1027,13 +979,13 @@ async def on_force_check(message: Message, bot: Bot) -> None:
                     
                     report_text += f"{i}. {user_display} (ID: {user['id']})\n"
                 
-                await message.answer(report_text)
+                await safe_reply_message(message, report_text)
             else:
-                await message.answer("✅ Barcha foydalanuvchilar obuna bo'lgan!")
+                await safe_reply_message(message, "✅ Barcha foydalanuvchilar obuna bo'lgan!")
                 
         except Exception as e:
             logging.error(f"❌ Ошибка при получении списка не подписанных пользователей: {e}")
-            await message.answer("✅ Majburiy tekshirish muvaffaqiyatli yakunlandi!")
+            await safe_reply_message(message, "✅ Majburiy tekshirish muvaffaqiyatli yakunlandi!")
         
     except Exception as e:
         logging.error(f"❌ Ошибка при принудительной проверке: {e}")
@@ -1045,7 +997,7 @@ async def on_force_check(message: Message, bot: Bot) -> None:
             logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки ошибки")
             return
         
-        await message.answer(f"❌ Majburiy tekshirishda xatolik yuz berdi: {e}")
+        await safe_reply_message(message, f"❌ Majburiy tekshirishda xatolik yuz berdi: {e}")
 
 
 @router.message(Command("id"))
@@ -1080,7 +1032,7 @@ async def on_id(message: Message, bot: Bot) -> None:
         logging.warning(f"⚠️ Пользователь {user_id} недоступен для отправки результата")
         return
 
-    await message.answer(f"chat.id = {chat.id}\nchat.type = {chat.type}")
+    await safe_reply_message(message, f"chat.id = {chat.id}\nchat.type = {chat.type}")
     logging.info(f"✅ Chat ID информация отправлена администратору {user_id}: chat.id={chat.id}, chat.type={chat.type}")
 
 
@@ -1096,9 +1048,7 @@ async def main() -> None:
     # Запускаем бота
     logging.info("🚀 Запускаем бота...")
     
-    # Запускаем задачу ежедневной проверки
-    asyncio.create_task(start_daily_checker(bot))
-    logging.info("⏰ Задача ежедневной проверки запущена")
+    # Автопланировщик ежедневной проверки отключен
     
     await dp.start_polling(bot)
 
