@@ -189,6 +189,15 @@ async def unmute_user(bot: Bot, chat_id: int, user_id: int) -> None:
     await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=permissions)
 
 
+async def unmute_after(bot: Bot, chat_id: int, user_id: int, delay_seconds: int) -> None:
+    try:
+        await asyncio.sleep(delay_seconds)
+        await unmute_user(bot, chat_id, user_id)
+        logging.info(f"🔓 Авто-размут: пользователь {user_id} снова может писать в чате {chat_id}")
+    except Exception as e:
+        logging.error(f"❌ Не удалось автоматически размутить пользователя {user_id}: {e}")
+
+
 async def delete_message_after(bot: Bot, chat_id: int, message_id: int, delay_seconds: int) -> None:
     logging.info(f"⏰ Сообщение {message_id} запланировано для удаления через {delay_seconds} секунд")
     try:
@@ -199,13 +208,16 @@ async def delete_message_after(bot: Bot, chat_id: int, message_id: int, delay_se
         logging.warning(f"⚠️ Не удалось удалить сообщение {message_id}: {e}")
 
 
-
-
-
-
-
-
-
+def extract_intended_user_id_from_text(text: Optional[str]) -> Optional[int]:
+    try:
+        if not text:
+            return None
+        match = re.search(r"tg://user\?id=(\d+)", text)
+        if match:
+            return int(match.group(1))
+    except Exception:
+        pass
+    return None
 
 
 def subscribed_keyboard() -> InlineKeyboardBuilder:
@@ -258,13 +270,9 @@ async def handle_new_member(bot: Bot, chat_id: int, user_id: int, message: Messa
     except Exception as e:
         logging.warning(f"⚠️ Не удалось получить статус участника для пользователя {user_id}: {e}")
 
-    # Mute user and send instruction
-    logging.info(f"🔇 Мутирую пользователя {user_id} за отсутствие подписки")
-    try:
-        await mute_user(bot, chat_id, user_id)
-        logging.info(f"✅ Успешно замьютил пользователя {user_id}")
-    except Exception as e:
-        logging.error(f"❌ Не удалось замьютить пользователя {user_id}: {e}")
+    # Не мутим при входе — ожидание первого сообщения
+    logging.info(f"🕓 Ожидаю первое сообщение от пользователя {user_id} для проверки. Не мутим при входе.")
+    return
 
     # Get user display name
     user_display_name = "Foydalanuvchi"  # fallback
@@ -752,38 +760,19 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
                 await unmute_user(bot, chat.id, user_id)
                 logging.info(f"✅ Успешно размутил пользователя {user_id}")
                 
-                # Отправляем приветственное сообщение
-                welcome_text = "🎉 Guruhga xush kelibsiz!\n\n✅ Endi xabar yozishingiz mumkin."
+                # Пропускаем отправку приветственного сообщения по требованию
+                logging.info("ℹ️ Приветственное сообщение не отправляется по настройке")
                 
+                # Удаляем сообщение с кнопкой через 5 секунд, только если сообщение предназначалось этому пользователю
                 try:
-                    # Try to reply first, fallback to new message if reply fails
-                    try:
-                        sent = await bot.send_message(
-                            chat_id=chat.id,
-                            text=welcome_text,
-                            reply_to_message_id=callback.message.message_id,
-                        )
-                    except Exception:
-                        logging.warning(f"⚠️ Не удалось ответить на сообщение {callback.message.message_id}, отправляю новое")
-                        sent = await safe_send_message(bot, chat.id, welcome_text)
-                    
-                    if sent:
-                        logging.info(f"📝 Отправлено приветственное сообщение пользователю {user_id}, message_id={sent.message_id}")
-                        
-                        # Планируем удаление приветственного сообщения
-                        asyncio.create_task(delete_message_after(bot, chat.id, sent.message_id, 10))
+                    intended_id = extract_intended_user_id_from_text(callback.message.text if callback.message else None)
+                    if intended_id == user_id:
+                        asyncio.create_task(delete_message_after(bot, chat.id, callback.message.message_id, 5))
+                        logging.info(f"🗑️ Запланировано удаление сообщения с кнопкой {callback.message.message_id} через 5 секунд для пользователя {user_id}")
                     else:
-                        logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {user_id}")
-                    
+                        logging.info(f"⏭️ Сообщение с кнопкой предназначено не этому пользователю ({intended_id} != {user_id}), досрочно не удаляем")
                 except Exception as e:
-                    logging.error(f"❌ Не удалось отправить приветственное сообщение пользователю {user_id}: {e}")
-                
-                # Удаляем сообщение с кнопкой (которое нажал пользователь)
-                try:
-                    await bot.delete_message(chat_id=chat.id, message_id=callback.message.message_id)
-                    logging.info(f"🗑️ Удалено сообщение с кнопкой {callback.message.message_id} для пользователя {user_id}")
-                except Exception as e:
-                    logging.error(f"❌ Не удалось удалить сообщение с кнопкой: {e}")
+                    logging.error(f"❌ Не удалось запланировать удаление сообщения с кнопкой: {e}")
                 
                 await callback.answer("Obuna tasdiqlandi! Siz ovozsiz qilindingiz.")
                 logging.info(f"✅ Подписка подтверждена и пользователь {user_id} размучен")
@@ -791,6 +780,16 @@ async def on_subscribed_click(callback: CallbackQuery, bot: Bot) -> None:
             else:
                 # Пользователь не замучен
                 logging.info(f"ℹ️ Пользователь {user_id} не замучен, но подписан")
+                # Удаляем сообщение с кнопкой через 5 секунд, только если сообщение предназначалось этому пользователю
+                try:
+                    intended_id = extract_intended_user_id_from_text(callback.message.text if callback.message else None)
+                    if intended_id == user_id:
+                        asyncio.create_task(delete_message_after(bot, chat.id, callback.message.message_id, 5))
+                        logging.info(f"🗑️ Запланировано удаление сообщения с кнопкой {callback.message.message_id} через 5 секунд для пользователя {user_id}")
+                    else:
+                        logging.info(f"⏭️ Сообщение с кнопкой предназначено не этому пользователю ({intended_id} != {user_id}), досрочно не удаляем")
+                except Exception as e:
+                    logging.error(f"❌ Не удалось запланировать удаление сообщения с кнопкой: {e}")
                 await callback.answer("Siz allaqachon ovozsiz emassiz va obuna bo'lgansiz!")
                 
         except Exception as e:
@@ -1034,6 +1033,78 @@ async def on_id(message: Message, bot: Bot) -> None:
 
     await safe_reply_message(message, f"chat.id = {chat.id}\nchat.type = {chat.type}")
     logging.info(f"✅ Chat ID информация отправлена администратору {user_id}: chat.id={chat.id}, chat.type={chat.type}")
+
+
+@router.message()
+async def on_group_message(message: Message, bot: Bot) -> None:
+    chat = message.chat
+    if chat.type not in ("group", "supergroup"):
+        return
+    if GROUP_ID is not None and chat.id != GROUP_ID:
+        return
+
+    user_id = message.from_user.id if message.from_user else None
+    if not user_id or user_id == bot.id:
+        return
+
+    # Админов и владельца не трогаем
+    try:
+        member = await bot.get_chat_member(chat.id, user_id)
+        member_status = getattr(member, "status", "member")
+        if member_status in ("administrator", "creator"):
+            return
+    except Exception:
+        pass
+
+    # Проверяем подписку
+    is_sub = await is_user_subscribed(bot, user_id)
+    if is_sub:
+        return
+
+    # Не подписан: удаляем его сообщение, временно мьютим, отправляем короткое уведомление
+    try:
+        try:
+            await bot.delete_message(chat.id, message.message_id)
+        except Exception:
+            pass
+
+        await mute_user(bot, chat.id, user_id)
+
+        user_display_name = message.from_user.first_name or "Foydalanuvchi"
+        if message.from_user.last_name:
+            user_display_name += f" {message.from_user.last_name}"
+        if message.from_user.username:
+            user_display_name = f"@{message.from_user.username}"
+
+        text = (
+            f"🔴 Guruhda yozish uchun kanalga obuna bo'ling.\n\n"
+            f"👤 <a href=\"tg://user?id={user_id}\">{user_display_name}</a>\n\n"
+            f"Obuna bo'lgach, quyidagi tugmani bosing — kirish ochiladi."
+        )
+
+        # компактная клавиатура: 1 кнопка «Obuna bo'lish», 1 — «Men obuna bo'ldim»
+        kb = InlineKeyboardBuilder()
+        if CHANNEL_LINK:
+            kb.button(text="📺 Obuna bo'lish", url=CHANNEL_LINK)
+        elif isinstance(CHANNEL_ID, str) and CHANNEL_ID.startswith('@'):
+            kb.button(text="📺 Obuna bo'lish", url=f"https://t.me/{CHANNEL_ID[1:]}")
+        else:
+            kb.button(text="📺 Obuna bo'lish", url=f"https://t.me/c/{str(CHANNEL_ID)[4:]}/1")
+        kb.button(text="✅ Men obuna bo'ldim", callback_data="i_subscribed")
+        kb.adjust(1)
+
+        sent_msg = await safe_send_message(
+            bot, chat.id, text,
+            reply_markup=kb.as_markup(),
+            disable_web_page_preview=True,
+        )
+
+        if sent_msg:
+            # через 60 сек удаляем уведомление и размьючиваем
+            asyncio.create_task(delete_message_after(bot, chat.id, sent_msg.message_id, 60))
+            asyncio.create_task(unmute_after(bot, chat.id, user_id, 60))
+    except Exception as e:
+        logging.error(f"❌ Ошибка при обработке сообщения неподписанного пользователя {user_id}: {e}")
 
 
 async def main() -> None:
