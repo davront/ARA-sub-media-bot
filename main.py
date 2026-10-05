@@ -176,6 +176,35 @@ async def send_notice(bot: Bot, chat_id: int, user: User, text: str) -> None:
         asyncio.create_task(delete_message_after(bot, chat_id, sent.message_id, MUTE_SECONDS))
 
 
+# media_group_id -> message_id частей альбома: Telegram присылает альбом отдельными апдейтами
+ALBUMS: dict[str, list[int]] = {}
+
+
+@router.channel_post()
+async def on_channel_post(message: Message, bot: Bot) -> None:
+    """Новый пост канала пересылаем в группу."""
+    if GROUP_ID is None or not is_our_channel(message.chat):
+        return
+
+    if message.media_group_id:
+        album = ALBUMS.setdefault(message.media_group_id, [])
+        album.append(message.message_id)
+        if len(album) > 1:
+            return  # пересылкой займется обработчик первой части
+        # ponytail: ждем остальные части фиксированную секунду; если альбомы рвутся — увеличить
+        await asyncio.sleep(1)
+        message_ids = sorted(ALBUMS.pop(message.media_group_id))
+    else:
+        message_ids = [message.message_id]
+
+    try:
+        await bot.forward_messages(chat_id=GROUP_ID, from_chat_id=message.chat.id, message_ids=message_ids)
+        logging.info(f"📤 Пост канала {message_ids} переслан в группу {GROUP_ID}")
+    except Exception as e:
+        # Например, в канале включен запрет пересылки (protected content)
+        logging.error(f"❌ Не удалось переслать пост {message_ids} в группу: {e}")
+
+
 @router.message(F.new_chat_members)
 async def on_new_chat_members(message: Message, bot: Bot) -> None:
     if GROUP_ID is not None and message.chat.id != GROUP_ID:
